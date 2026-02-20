@@ -1,13 +1,16 @@
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
 from app import models
-from app.database import engine, get_db
+from app.database import engine, get_db, init_db
+from app.embeddings import chunk_text, get_embeddings
 
 load_dotenv()
 
+init_db()
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -20,6 +23,25 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+@app.post("/ingest")
+def ingest_availability(db: Session = Depends(get_db)):
+    with open("sample_data/availability.txt", "r") as f:
+        text_content = f.read()
+
+    chunks = chunk_text(text_content)
+    embeddings = get_embeddings(chunks)
+
+    for chunk, embedding in zip(chunks, embeddings):
+        db_chunk = models.DocumentChunk(
+            content=chunk,
+            embedding=embedding,
+            source="availability.txt"
+        )
+        db.add(db_chunk)
+    db.commit()
+
+    return {"message": f"Ingested {len(chunks)} chunks"}
 
 @app.post("/generate-schedule")
 def generate_schedule(db: Session = Depends(get_db)):
