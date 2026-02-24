@@ -44,6 +44,20 @@ PostgreSQL (Schedule History)
 | POST | `/generate-schedule` | Generate AI schedule from availability |
 | GET | `/schedules` | Retrieve all past schedules |
 
+## Live Demo
+
+API is deployed on AWS ECS Fargate:
+
+- Health check: http://107.23.142.250:8000/health
+- API docs: http://107.23.142.250:8000/docs
+
+## CI/CD
+
+Every push to main automatically:
+1. Builds a new Docker image
+2. Pushes to AWS ECR
+3. Deploys to ECS Fargate via GitHub Actions
+
 ## Running Locally
 
 ### Prerequisites
