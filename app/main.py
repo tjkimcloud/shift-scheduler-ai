@@ -9,6 +9,9 @@ from app.embeddings import chunk_text, get_embeddings
 from app.google_drive import create_flow, get_drive_service, list_files, download_file
 from app.auth import get_current_user, get_supabase
 from app.llm_provider import generate_completion
+from app.billing import create_checkout_session, create_portal_session, handle_webhook
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
 load_dotenv()
 
@@ -176,3 +179,56 @@ def get_me(db: Session = Depends(get_db), current_user=Depends(get_current_user)
         "schedules_this_month": db_user.schedules_this_month,
         "schedules_remaining": "unlimited" if db_user.is_pro else max(0, FREE_TIER_LIMIT - db_user.schedules_this_month)
     }
+
+@app.post("/billing/checkout")
+def checkout(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    checkout_url = create_checkout_session(
+        user_id=current_user.id,
+        email=db_user.email
+    )
+    return {"checkout_url": checkout_url}
+
+@app.post("/billing/portal")
+def billing_portal(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not db_user or not db_user.stripe_customer_id:
+        raise HTTPException(status_code=400, detail="No billing account found")
+    
+    portal_url = create_portal_session(db_user.stripe_customer_id)
+    return {"portal_url": portal_url}
+
+@app.post("/billing/webhook")
+async def webhook(request: Request, db: Session = Depends(get_db)):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    
+    try:
+        event = handle_webhook(payload, sig_header)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        user_id = session["metadata"]["user_id"]
+        customer_id = session["customer"]
+        
+        db_user = db.query(models.User).filter(models.User.id == user_id).first()
+        if db_user:
+            db_user.is_pro = True
+            db_user.stripe_customer_id = customer_id
+            db.commit()
+    
+    elif event["type"] == "customer.subscription.deleted":
+        customer_id = event["data"]["object"]["customer"]
+        db_user = db.query(models.User).filter(
+            models.User.stripe_customer_id == customer_id
+        ).first()
+        if db_user:
+            db_user.is_pro = False
+            db.commit()
+    
+    return JSONResponse(content={"status": "success"})
