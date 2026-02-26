@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
 from app import models
@@ -12,6 +13,10 @@ from app.llm_provider import generate_completion
 from app.billing import create_checkout_session, create_portal_session, handle_webhook
 from fastapi import Request
 from fastapi.responses import JSONResponse
+
+class AuthRequest(BaseModel):
+    email: str
+    password: str
 
 load_dotenv()
 
@@ -42,12 +47,12 @@ def health():
     return {"status": "healthy"}
 
 @app.post("/auth/register")
-def register(email: str, password: str, db: Session = Depends(get_db)):
+def register(request: AuthRequest, db: Session = Depends(get_db)):
     supabase = get_supabase()
     try:
-        response = supabase.auth.sign_up({"email": email, "password": password})
+        response = supabase.auth.sign_up({"email": request.email, "password": request.password})
         user_id = response.user.id
-        db_user = models.User(id=user_id, email=email)
+        db_user = models.User(id=user_id, email=request.email)
         db.add(db_user)
         db.commit()
         return {"message": "User created successfully", "user_id": user_id}
@@ -55,10 +60,10 @@ def register(email: str, password: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/auth/login")
-def login(email: str, password: str):
+def login(request: AuthRequest):
     supabase = get_supabase()
     try:
-        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        response = supabase.auth.sign_in_with_password({"email": request.email, "password": request.password})
         return {
             "access_token": response.session.access_token,
             "user_id": response.user.id
