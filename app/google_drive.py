@@ -16,7 +16,7 @@ CLIENT_CONFIG = {
         "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": ["http://localhost:8000/auth/callback"]
+        "redirect_uris": ["https://api.schedio.cloud/auth/callbackk"]
     }
 }
 
@@ -24,7 +24,7 @@ def create_flow():
     flow = Flow.from_client_config(
         CLIENT_CONFIG,
         scopes=SCOPES,
-        redirect_uri="http://localhost:8000/auth/callback"
+        redirect_uri="https://api.schedio.cloud/auth/callback"
     )
     return flow
 
