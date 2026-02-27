@@ -180,7 +180,11 @@ resource "aws_ecs_task_definition" "app" {
   {
     name      = "OPENAI_API_KEY"
     valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/openai-api-key"
-  }
+  },
+  {
+  name      = "GOOGLE_CLIENT_SECRET"
+  valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/google-client-secret"
+},
 ],
 environment = [
   {
@@ -190,7 +194,11 @@ environment = [
   {
     name  = "LLM_PROVIDER"
     value = "openai"
-  }
+  },
+  {
+  name  = "GOOGLE_CLIENT_ID"
+  value = "300853808279-82ekv3tleml9kad7el5tabg1sggqd9f3.apps.googleusercontent.com"
+},
 ]
     logConfiguration = {
       logDriver = "awslogs"
