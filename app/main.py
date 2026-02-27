@@ -90,7 +90,7 @@ def callback(code: str, state: str):
         'client_id': credentials.client_id,
         'client_secret': credentials.client_secret
     }
-    return {"message": "Successfully connected to Google Drive"}
+    return RedirectResponse("https://schedio.cloud/dashboard")
 
 @app.get("/drive/files")
 def get_files(current_user=Depends(get_current_user)):
