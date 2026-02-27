@@ -46,10 +46,6 @@ def root():
 def health():
     return {"status": "healthy"}
 
-@app.get("/debug/oauth")
-def debug_oauth():
-    return {"google_client_id": os.getenv("GOOGLE_CLIENT_ID"), "redirect": "https://api.schedio.cloud/auth/callback"}
-
 @app.post("/auth/register")
 def register(request: AuthRequest, db: Session = Depends(get_db)):
     supabase = get_supabase()
