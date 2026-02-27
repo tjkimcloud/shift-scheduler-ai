@@ -16,7 +16,7 @@ CLIENT_CONFIG = {
         "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": ["https://api.schedio.cloud/auth/callbackk"]
+        "redirect_uris": ["https://api.schedio.cloud/auth/callback"]
     }
 }
 
