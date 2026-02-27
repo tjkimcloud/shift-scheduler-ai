@@ -36,9 +36,23 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - name: Update ECS service
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: shift-scheduler-ai
+          IMAGE_TAG: ${{ github.sha }}
         run: |
+          TASK_DEF=$(aws ecs describe-task-definition --task-definition shift-scheduler-ai --region us-east-1)
+          NEW_TASK_DEF=$(echo $TASK_DEF | python3 -c "
+          import json, sys
+          td = json.load(sys.stdin)['taskDefinition']
+          td['containerDefinitions'][0]['image'] = '$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG'
+          keys = ['taskDefinitionArn','revision','status','requiresAttributes','compatibilities','registeredAt','registeredBy']
+          [td.pop(k, None) for k in keys]
+          print(json.dumps(td))
+          ")
+          NEW_REV=$(aws ecs register-task-definition --region us-east-1 --cli-input-json "$NEW_TASK_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
           aws ecs update-service \
             --cluster shift-scheduler-ai-cluster \
             --service shift-scheduler-ai-service \
-            --force-new-deployment \
+            --task-definition $NEW_REV \
             --region us-east-1
