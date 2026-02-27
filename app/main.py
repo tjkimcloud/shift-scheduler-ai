@@ -46,6 +46,11 @@ def root():
 def health():
     return {"status": "healthy"}
 
+@app.get("/debug/oauth")
+def debug_oauth():
+    from app.google_drive import CLIENT_CONFIG
+    return {"redirect_uri": CLIENT_CONFIG["web"]["redirect_uris"]}
+
 @app.post("/auth/register")
 def register(request: AuthRequest, db: Session = Depends(get_db)):
     supabase = get_supabase()
