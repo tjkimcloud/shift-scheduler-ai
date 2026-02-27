@@ -48,8 +48,7 @@ def health():
 
 @app.get("/debug/oauth")
 def debug_oauth():
-    from app.google_drive import CLIENT_CONFIG
-    return {"redirect_uri": CLIENT_CONFIG["web"]["redirect_uris"]}
+    return {"google_client_id": os.getenv("GOOGLE_CLIENT_ID"), "redirect": "https://api.schedio.cloud/auth/callback"}
 
 @app.post("/auth/register")
 def register(request: AuthRequest, db: Session = Depends(get_db)):
