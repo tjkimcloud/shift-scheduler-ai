@@ -12,8 +12,8 @@ class User(Base):
     is_pro = Column(Boolean, default=False)
     schedules_this_month = Column(Integer, default=0)
     stripe_customer_id = Column(String, nullable=True)
+    google_credentials = Column(Text, nullable=True)  # JSON string of OAuth tokens
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    stripe_customer_id = Column(String, nullable=True)
 
 class Schedule(Base):
     __tablename__ = "schedules"

@@ -34,8 +34,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-token_store = {}
-
 FREE_TIER_LIMIT = 3
 
 @app.get("/")
@@ -72,50 +70,59 @@ def login(request: AuthRequest):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
 @app.get("/drive/auth")
-def drive_auth():
+def drive_auth(current_user=Depends(get_current_user)):
     flow = create_flow()
     auth_url, state = flow.authorization_url(prompt='consent')
-    token_store['state'] = state
     return RedirectResponse(auth_url)
 
 @app.get("/auth/callback")
-def callback(code: str, state: str):
+def callback(code: str, state: str, db: Session = Depends(get_db)):
     flow = create_flow()
     flow.fetch_token(code=code)
     credentials = flow.credentials
-    token_store['credentials'] = {
+    creds_dict = {
         'token': credentials.token,
         'refresh_token': credentials.refresh_token,
         'token_uri': credentials.token_uri,
         'client_id': credentials.client_id,
         'client_secret': credentials.client_secret
     }
+    service = get_drive_service(creds_dict)
+    about = service.about().get(fields='user').execute()
+    google_email = about['user']['emailAddress']
+    db_user = db.query(models.User).filter(models.User.email == google_email).first()
+    if db_user:
+        import json
+        db_user.google_credentials = json.dumps(creds_dict)
+        db.commit()
     return RedirectResponse("https://schedio.cloud/dashboard")
 
 @app.get("/drive/files")
-def get_files(current_user=Depends(get_current_user)):
-    if 'credentials' not in token_store:
+def get_files(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    import json
+    db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not db_user or not db_user.google_credentials:
         return {"error": "Not connected to Google Drive. Visit /drive/auth first"}
-    service = get_drive_service(token_store['credentials'])
+    creds = json.loads(db_user.google_credentials)
+    service = get_drive_service(creds)
     files = list_files(service)
     return {"files": files}
 
 @app.post("/drive/ingest/{file_id}")
 def ingest_drive_file(file_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if 'credentials' not in token_store:
+    import json
+    db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not db_user or not db_user.google_credentials:
         return {"error": "Not connected to Google Drive. Visit /drive/auth first"}
-    
-    service = get_drive_service(token_store['credentials'])
+    creds = json.loads(db_user.google_credentials)
+    service = get_drive_service(creds)
     files = list_files(service)
     file_info = next((f for f in files if f['id'] == file_id), None)
-    
     if not file_info:
         raise HTTPException(status_code=404, detail="File not found")
-    
     content = download_file(service, file_id, file_info['mimeType'])
     chunks = chunk_text(content)
     embeddings = get_embeddings(chunks)
-    
     for chunk, embedding in zip(chunks, embeddings):
         db_chunk = models.DocumentChunk(
             user_id=current_user.id,
@@ -125,7 +132,6 @@ def ingest_drive_file(file_id: str, db: Session = Depends(get_db), current_user=
         )
         db.add(db_chunk)
     db.commit()
-    
     return {"message": f"Ingested {len(chunks)} chunks from {file_info['name']}"}
 
 @app.post("/generate-schedule")
