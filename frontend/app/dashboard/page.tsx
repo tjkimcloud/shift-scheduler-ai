@@ -121,9 +121,12 @@ export default function Dashboard() {
     return res.json()
   }
 
-  const connectDrive = () => {
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/drive/auth`
-  }
+  const connectDrive = async () => {
+    const data = await apiCall('/drive/auth')
+    if (data?.auth_url) {
+        window.location.href = data.auth_url
+    }
+}
 
   const loadFiles = async () => {
     const data = await apiCall('/drive/files')

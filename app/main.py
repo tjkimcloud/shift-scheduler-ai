@@ -73,7 +73,7 @@ def login(request: AuthRequest):
 def drive_auth(current_user=Depends(get_current_user)):
     flow = create_flow()
     auth_url, state = flow.authorization_url(prompt='consent')
-    return RedirectResponse(auth_url)
+    return {"auth_url": auth_url}
 
 @app.get("/auth/callback")
 def callback(code: str, state: str, db: Session = Depends(get_db)):
