@@ -488,6 +488,7 @@ export default function Dashboard() {
                                 draggable
                                 onDragStart={() => handleDragStart(shift.id)}
                                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                onDrop={(e) => { e.stopPropagation(); handleDrop(day, shift.startHour); }}
                                 className={`shift-block absolute left-1 right-1 rounded-lg border ${shift.color} px-2 py-1 overflow-hidden`}
                                 style={{
                                   top: `${(shift.startHour - 6) * HOUR_HEIGHT + 2}px`,
