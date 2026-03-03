@@ -196,7 +196,17 @@ def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depen
             {"role": "user", "content": request.message}
         ]
     )
-    return {"response": response.choices[0].message.content}
+    full_response = response.choices[0].message.content
+    
+    # Split confirmation from schedule
+    confirm = full_response
+    schedule = ""
+    if "SCHEDULE:" in full_response:
+        parts = full_response.split("SCHEDULE:", 1)
+        confirm = parts[0].replace("CONFIRM:", "").strip()
+        schedule = parts[1].strip()
+    
+    return {"response": confirm, "schedule": schedule}
 
 @app.get("/schedules")
 def get_schedules(db: Session = Depends(get_db), current_user=Depends(get_current_user)):

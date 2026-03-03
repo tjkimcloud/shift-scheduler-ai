@@ -198,10 +198,12 @@ export default function Dashboard() {
       const reply = data?.response || "I couldn't process that request."
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
 
-      const newShifts = parseScheduleToShifts(reply)
-      if (newShifts.length > 2) {
-        setShifts(newShifts)
-        setRawSchedule(reply)
+      if (data?.schedule) {
+        const newShifts = parseScheduleToShifts(data.schedule)
+        if (newShifts.length > 2) {
+          setShifts(newShifts)
+          setRawSchedule(data.schedule)
+        }
       }
     } catch {
       setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I had trouble processing that. Please try again.' }])
@@ -475,7 +477,7 @@ export default function Dashboard() {
                                 key={hour}
                                 className="drop-zone border-b border-white/5"
                                 style={{ height: HOUR_HEIGHT }}
-                                onDragOver={e => e.preventDefault()}
+                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                 onDrop={() => handleDrop(day, hour)}
                               />
                             ))}
@@ -485,6 +487,7 @@ export default function Dashboard() {
                                 key={shift.id}
                                 draggable
                                 onDragStart={() => handleDragStart(shift.id)}
+                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                 className={`shift-block absolute left-1 right-1 rounded-lg border ${shift.color} px-2 py-1 overflow-hidden`}
                                 style={{
                                   top: `${(shift.startHour - 6) * HOUR_HEIGHT + 2}px`,
