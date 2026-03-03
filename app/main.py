@@ -192,13 +192,29 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     from openai import OpenAI
+    from datetime import datetime
     client = OpenAI()
     
-    # Pull relevant chunks from RAG database
-    chunks = db.query(models.DocumentChunk).filter(
-        models.DocumentChunk.user_id == current_user.id
-    ).limit(10).all()
-    historical_context = "\n\n".join([chunk.content for chunk in chunks]) if chunks else ""
+    # Get embedding for the user's question
+    question_embedding = get_embeddings([request.message])[0]
+    
+    # Vector similarity search - find most relevant chunks
+    relevant_chunks = db.execute(
+        """
+        SELECT content, source, 
+               1 - (embedding <=> :embedding) as similarity
+        FROM document_chunks 
+        WHERE user_id = :user_id
+        ORDER BY embedding <=> :embedding
+        LIMIT 5
+        """,
+        {"embedding": str(question_embedding), "user_id": current_user.id}
+    ).fetchall()
+    
+    historical_context = "\n\n".join([
+        f"[Source: {chunk.source}]\n{chunk.content}" 
+        for chunk in relevant_chunks
+    ]) if relevant_chunks else ""
     
     response = client.chat.completions.create(
         model="gpt-4o-mini",
