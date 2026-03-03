@@ -179,13 +179,20 @@ class ChatRequest(BaseModel):
     schedule: str
 
 @app.post("/chat")
-def chat(request: ChatRequest, current_user=Depends(get_current_user)):
+def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     from openai import OpenAI
     client = OpenAI()
+    
+    # Pull relevant chunks from RAG database
+    chunks = db.query(models.DocumentChunk).filter(
+        models.DocumentChunk.user_id == current_user.id
+    ).limit(10).all()
+    historical_context = "\n\n".join([chunk.content for chunk in chunks]) if chunks else ""
+    
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": f"You are a scheduling assistant. The current schedule is:\n\n{request.schedule}\n\nHelp the user adjust the schedule. When they request changes, provide an updated schedule in the same format. Keep responses concise."},
+            {"role": "system", "content": f"You are a scheduling assistant for a small business. The current schedule is:\n\n{request.schedule}\n\nHistorical availability and schedule data:\n\n{historical_context}\n\nYou ONLY help with scheduling-related requests such as: adding/removing employees, adjusting shift times, swapping shifts, changing days, or answering questions about employee history from the data provided. If the user asks anything unrelated to scheduling, politely decline. When making changes, confirm briefly in 1-2 sentences then provide the full updated schedule in the same format."},
             {"role": "user", "content": request.message}
         ]
     )
