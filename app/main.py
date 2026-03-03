@@ -192,7 +192,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depen
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": f"You are a friendly scheduling assistant. Current schedule:\n\n{request.schedule}\n\nHistorical data:\n\n{historical_context}\n\nRespond like a helpful human colleague - very brief and conversational (1-2 sentences max like 'Done! Ted Scott is added Saturday 12-2pm.'). Only help with scheduling tasks. If asked anything unrelated, decline politely. After your brief confirmation, provide the updated schedule in the exact same format as the original."},
+            {"role": "system", "content": f"You are a friendly scheduling assistant. Current schedule:\n\n{request.schedule}\n\nHistorical data:\n\n{historical_context}\n\nYou can freely add new employees, remove employees, adjust shift times, swap shifts, and make any scheduling changes requested. When making changes, respond in exactly this format:\nCONFIRM: [1 sentence like 'Done! Eric Kim added Sunday 8-10am.']\nSCHEDULE:\n[full updated schedule in same format]\n\nOnly help with scheduling tasks. Decline anything unrelated."},
             {"role": "user", "content": request.message}
         ]
     )
