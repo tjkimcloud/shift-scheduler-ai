@@ -174,6 +174,23 @@ def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_cu
     
     return {"schedule": schedule}
 
+class ChatRequest(BaseModel):
+    message: str
+    schedule: str
+
+@app.post("/chat")
+def chat(request: ChatRequest, current_user=Depends(get_current_user)):
+    from openai import OpenAI
+    client = OpenAI()
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": f"You are a scheduling assistant. The current schedule is:\n\n{request.schedule}\n\nHelp the user adjust the schedule. When they request changes, provide an updated schedule in the same format. Keep responses concise."},
+            {"role": "user", "content": request.message}
+        ]
+    )
+    return {"response": response.choices[0].message.content}
+
 @app.get("/schedules")
 def get_schedules(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     schedules = db.query(models.Schedule).filter(

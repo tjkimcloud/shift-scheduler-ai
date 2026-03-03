@@ -41,43 +41,51 @@ const HOUR_HEIGHT = 56 // px per hour
 
 function parseScheduleToShifts(scheduleText: string): Shift[] {
   const shifts: Shift[] = []
-  const lines = scheduleText.split('\n')
   const employeeColors: Record<string, string> = {}
   let colorIndex = 0
 
-  const timeRegex = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/gi
+  const lines = scheduleText.split('\n')
+  let currentDay = ''
 
   for (const line of lines) {
-    const dayMatch = DAYS.find(d => line.toLowerCase().includes(d.toLowerCase()))
-    if (!dayMatch) continue
+    // Check if line is a day header
+    const dayMatch = DAYS.find(d => line.toLowerCase().includes(d.toLowerCase() + ':'))
+    if (dayMatch) {
+      currentDay = dayMatch
+      continue
+    }
 
-    const nameMatch = line.match(/^([A-Za-z\s]+?)[\s:–-]+/)?.[1]?.trim()
+    if (!currentDay) continue
+
+    // Match times like 8am, 4pm, 11am, 7pm
+    const timeMatches = [...line.matchAll(/(\d{1,2})(am|pm)/gi)]
+    if (timeMatches.length < 2) continue
+
+    // Match employee name - after the colon
+    const nameMatch = line.match(/:\s*([A-Za-z\s]+?)(?:\s*\(|$)/)?.[1]?.trim()
     if (!nameMatch || nameMatch.length < 2) continue
-
-    const times = [...line.matchAll(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/gi)]
-    if (times.length < 2) continue
 
     const parseHour = (match: RegExpMatchArray) => {
       let h = parseInt(match[1])
-      const period = match[3]?.toLowerCase()
+      const period = match[2].toLowerCase()
       if (period === 'pm' && h !== 12) h += 12
       if (period === 'am' && h === 12) h = 0
       return h
     }
 
-    const startHour = parseHour(times[0])
-    const endHour = parseHour(times[1])
+    const startHour = parseHour(timeMatches[0])
+    const endHour = parseHour(timeMatches[1])
 
     if (!employeeColors[nameMatch]) {
       employeeColors[nameMatch] = COLORS[colorIndex % COLORS.length]
       colorIndex++
     }
 
-    if (startHour >= 6 && endHour <= 23 && startHour < endHour) {
+    if (startHour >= 6 && endHour <= 24 && startHour < endHour) {
       shifts.push({
-        id: `${nameMatch}-${dayMatch}-${startHour}`,
+        id: `${nameMatch}-${currentDay}-${startHour}`,
         employee: nameMatch,
-        day: dayMatch,
+        day: currentDay,
         startHour,
         endHour,
         color: employeeColors[nameMatch],
@@ -183,24 +191,13 @@ export default function Dashboard() {
     setChatLoading(true)
 
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          system: `You are a scheduling assistant for a restaurant. The current schedule is:\n\n${rawSchedule}\n\nHelp the user adjust the schedule. When they request changes, describe what you changed clearly and provide an updated schedule in the same format. Keep responses concise and helpful.`,
-          messages: [
-            ...chatMessages.map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: userMsg }
-          ]
-        })
+      const data = await apiCall('/chat', 'POST', {
+        message: userMsg,
+        schedule: rawSchedule
       })
-      const data = await response.json()
-      const reply = data.content?.[0]?.text || "I couldn't process that request."
+      const reply = data?.response || "I couldn't process that request."
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
 
-      // Try to re-parse if schedule was updated
       const newShifts = parseScheduleToShifts(reply)
       if (newShifts.length > 2) {
         setShifts(newShifts)
