@@ -167,6 +167,17 @@ def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_cu
         generated_schedule=schedule
     )
     db.add(db_schedule)
+
+    # Save generated schedule as searchable document chunk for RAG
+    from datetime import datetime
+    schedule_embeddings = get_embeddings([schedule])
+    schedule_chunk = models.DocumentChunk(
+        user_id=current_user.id,
+        content=f"Generated schedule for week of {datetime.now().strftime('%B %d, %Y')}:\n{schedule}",
+        embedding=schedule_embeddings[0],
+        source=f"Generated Schedule - {datetime.now().strftime('%B %d, %Y')}"
+    )
+    db.add(schedule_chunk)
     db.commit()
     
     db_user.schedules_this_month += 1
