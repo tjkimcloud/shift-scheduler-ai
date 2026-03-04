@@ -149,6 +149,8 @@ def ingest_drive_file(file_id: str, db: Session = Depends(get_db), current_user=
 @app.post("/generate-schedule")
 def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     from datetime import datetime, timedelta
+    from openai import OpenAI
+    import json
     
     db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
     
@@ -168,40 +170,37 @@ def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_cu
     if not chunks:
         raise HTTPException(status_code=400, detail="No availability data found. Please ingest files first.")
     
-    availability = "\n\n".join([chunk.content for chunk in chunks])
+    availability = "\\n\\n".join([chunk.content for chunk in chunks])
     
     # Generate week dates starting from Monday
     today = datetime.now()
     day_of_week = today.weekday()
     monday = today - timedelta(days=day_of_week)
     week_dates = [(monday + timedelta(days=i)).strftime('%A, %m/%d/%Y') for i in range(7)]
-    week_str = "\n".join(week_dates)
+    week_str = "\\n".join(week_dates)
     
     # Generate human-readable schedule
     schedule = generate_completion(
-        prompt=f"Here is the employee availability:\n\n{availability}\n\nPlease create a weekly schedule for the following week:\n{week_str}\n\nLabel each day with its full date (e.g. 'Monday, 03/02/2026'). Business hours are 9am to 10pm.",
+        prompt=f"Here is the employee availability:\\n\\n{availability}\\n\\nPlease create a weekly schedule for the following week:\\n{week_str}\\n\\nLabel each day with its full date (e.g. 'Monday, 03/02/2026'). Business hours are 9am to 10pm.",
         system="You are a scheduling assistant for small businesses. Create a fair weekly schedule based on employee availability. Always include the full date with each day."
     )
     
-    # Convert to structured JSON for the calendar
-    from openai import OpenAI
+# Convert to structured JSON for the calendar
     client = OpenAI()
     json_response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "Convert the schedule to JSON. Return ONLY valid JSON, no markdown, no backticks, no explanation. Format: {\"shifts\": [{\"employee\": \"Name\", \"day\": \"Monday\", \"startHour\": 9, \"endHour\": 17}]}"},
+            {"role": "system", "content": 'Convert the schedule to JSON. Return ONLY valid JSON, no markdown, no backticks, no explanation. Format: {"shifts": [{"employee": "Name", "day": "Monday", "startHour": 9, "endHour": 17}]}'},
             {"role": "user", "content": schedule}
         ]
     )
     
-    import json
     try:
         schedule_json = json.loads(json_response.choices[0].message.content)
     except:
         schedule_json = {"shifts": []}
-    
-    return {"schedule": schedule, "shifts": schedule_json["shifts"]}
-    
+
+    # Save schedule to DB
     db_schedule = models.Schedule(
         user_id=current_user.id,
         availability_text=availability,
@@ -209,21 +208,35 @@ def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_cu
     )
     db.add(db_schedule)
 
-    # Save generated schedule as searchable document chunk for RAG
-    schedule_embeddings = get_embeddings([schedule])
+    # Increment usage counter
+    db_user.schedules_this_month += 1
+    db.commit()
+
+    return {"schedule": schedule, "shifts": schedule_json["shifts"]}
+
+class FinalizeRequest(BaseModel):
+    schedule: str
+
+@app.post("/finalize-schedule")
+def finalize_schedule(request: FinalizeRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from datetime import datetime, timedelta
+
+    today = datetime.now()
+    monday = today - timedelta(days=today.weekday())
+    week_dates = [(monday + timedelta(days=i)).strftime('%A, %m/%d/%Y') for i in range(7)]
+
+    # Save finalized schedule as RAG chunk
+    schedule_embeddings = get_embeddings([request.schedule])
     schedule_chunk = models.DocumentChunk(
         user_id=current_user.id,
-        content=f"Generated schedule for week of {week_dates[0]} through {week_dates[6]}:\n{schedule}",
+        content=f"Finalized schedule for week of {week_dates[0]} through {week_dates[6]}:\\n{request.schedule}",
         embedding=schedule_embeddings[0],
-        source=f"Generated Schedule - {week_dates[0]}"
+        source=f"Finalized Schedule - {week_dates[0]}"
     )
     db.add(schedule_chunk)
     db.commit()
-    
-    db_user.schedules_this_month += 1
-    db.commit()
-    
-    return {"schedule": schedule}
+
+    return {"message": "Schedule finalized and saved successfully."}
 
 class ChatRequest(BaseModel):
     message: str
