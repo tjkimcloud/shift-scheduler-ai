@@ -248,7 +248,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depen
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": f"You are a friendly scheduling assistant. Today is {datetime.now().strftime('%B %d, %Y')}.\n\nCurrent schedule:\n\n{request.schedule}\n\nRelevant historical data:\n\n{historical_context}\n\nYou can: add/remove employees, adjust shifts, answer questions about employee history. When making schedule changes, respond in exactly this format:\nCONFIRM: [1 sentence confirmation]\nSCHEDULE:\n[full updated schedule]\n\nFor questions, just answer in 1-2 sentences. Only decline unrelated requests."},
+            {"role": "system", "content": f"You are a friendly scheduling assistant. Today is {datetime.now().strftime('%B %d, %Y')}.\n\nCurrent schedule:\n\n{request.schedule}\n\nRelevant historical data:\n\n{historical_context}\n\nYou can freely add new employees with whatever hours the user specifies, remove employees, adjust shifts, and make any scheduling changes. Never ask for qualifications or availability before making changes — just do it. When making schedule changes, respond in exactly this format:\nCONFIRM: [1 sentence confirmation]\nSCHEDULE:\n[full updated schedule]\n\nFor questions, just answer in 1-2 sentences. Only decline requests completely unrelated to scheduling."},
             {"role": "user", "content": request.message}
         ]
     )
