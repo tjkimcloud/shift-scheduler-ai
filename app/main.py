@@ -226,15 +226,17 @@ def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depen
     
     question_embedding = get_embeddings([request.message])[0]
     
+    from sqlalchemy import text
+    
     relevant_chunks = db.execute(
-        """
+        text("""
         SELECT content, source, 
                1 - (embedding <=> :embedding) as similarity
         FROM document_chunks 
         WHERE user_id = :user_id
         ORDER BY embedding <=> :embedding
         LIMIT 5
-        """,
+        """),
         {"embedding": str(question_embedding), "user_id": current_user.id}
     ).fetchall()
     
