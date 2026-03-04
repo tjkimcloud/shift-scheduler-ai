@@ -26,7 +26,7 @@ interface ChatMessage {
 
 const getWeekDays = () => {
     const today = new Date()
-    const dayOfWeek = today.getDay() // 0 = Sunday
+    const dayOfWeek = today.getDay()
     const monday = new Date(today)
     monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1))
 
@@ -41,7 +41,7 @@ const getWeekDays = () => {
 
 const WEEK_DAYS = getWeekDays()
 const DAYS = WEEK_DAYS.map(d => d.full)
-const HOURS = Array.from({ length: 17 }, (_, i) => i + 6) // 6am to 10pm
+const HOURS = Array.from({ length: 17 }, (_, i) => i + 6)
 const COLORS = [
     'bg-emerald-500/80 border-emerald-400',
     'bg-sky-500/80 border-sky-400',
@@ -53,7 +53,7 @@ const COLORS = [
     'bg-orange-500/80 border-orange-400',
 ]
 
-const HOUR_HEIGHT = 56 // px per hour
+const HOUR_HEIGHT = 56
 
 function parseScheduleToShifts(scheduleText: string): Shift[] {
     const shifts: Shift[] = []
@@ -64,7 +64,6 @@ function parseScheduleToShifts(scheduleText: string): Shift[] {
     let currentDay = ''
 
     for (const line of lines) {
-        // Check if line is a day header
         const dayMatch = DAYS.find(d => line.toLowerCase().includes(d.toLowerCase()))
         if (dayMatch) {
             currentDay = dayMatch
@@ -73,11 +72,9 @@ function parseScheduleToShifts(scheduleText: string): Shift[] {
 
         if (!currentDay) continue
 
-        // Match times like 8am, 4pm, 11am, 7pm
         const timeMatches = [...line.matchAll(/(\d{1,2})(am|pm)/gi)]
         if (timeMatches.length < 2) continue
 
-        // Match employee name - after the colon
         const nameMatch = line.match(/:\s*([A-Za-z\s]+?)(?:\s*\(|$)/)?.[1]?.trim()
         if (!nameMatch || nameMatch.length < 2) continue
 
@@ -127,6 +124,7 @@ export default function Dashboard() {
     const [showDrive, setShowDrive] = useState(false)
     const [files, setFiles] = useState<{ id: string, name: string, mimeType: string }[]>([])
     const [ingesting, setIngesting] = useState<string | null>(null)
+    const [driveConnected, setDriveConnected] = useState(false)
     const chatEndRef = useRef<HTMLDivElement>(null)
     const router = useRouter()
 
@@ -154,8 +152,14 @@ export default function Dashboard() {
 
     const loadFiles = async () => {
         const data = await apiCall('/drive/files')
-        if (data?.files) setFiles(data.files)
-        if (data?.error) setMessage(data.error)
+        if (data?.files) {
+            setFiles(data.files)
+            setDriveConnected(true)
+        }
+        if (data?.error) {
+            setDriveConnected(false)
+            setMessage(data.error)
+        }
     }
 
     const ingestFile = async (fileId: string) => {
@@ -175,44 +179,54 @@ export default function Dashboard() {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [chatMessages])
 
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search)
+        if (params.get('connected') === 'google') {
+            setMessage('✅ Google Drive connected successfully!')
+            setDriveConnected(true)
+            setShowDrive(true)
+            window.history.replaceState({}, '', '/dashboard')
+        }
+    }, [])
+
     const generateSchedule = async () => {
-    setLoading(true)
-    setShifts([])
-    setRawSchedule('')
-    const data = await apiCall('/generate-schedule', 'POST')
-    if (data?.shifts && data.shifts.length > 0) {
-      const employeeColors: Record<string, string> = {}
-      let colorIndex = 0
-      const parsedShifts = data.shifts.map((s: any) => {
-        if (!employeeColors[s.employee]) {
-          employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
-          colorIndex++
+        setLoading(true)
+        setShifts([])
+        setRawSchedule('')
+        const data = await apiCall('/generate-schedule', 'POST')
+        if (data?.shifts && data.shifts.length > 0) {
+            const employeeColors: Record<string, string> = {}
+            let colorIndex = 0
+            const parsedShifts = data.shifts.map((s: any) => {
+                if (!employeeColors[s.employee]) {
+                    employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
+                    colorIndex++
+                }
+                return {
+                    id: `${s.employee}-${s.day}-${s.startHour}`,
+                    employee: s.employee,
+                    day: s.day,
+                    startHour: s.startHour,
+                    endHour: s.endHour,
+                    color: employeeColors[s.employee]
+                }
+            })
+            setShifts(parsedShifts)
+            setRawSchedule(data.schedule)
+            setActiveTab('calendar')
+            setChatMessages([{
+                role: 'assistant',
+                content: "I've generated your schedule! You can drag shifts to adjust them, or ask me to make changes — like \"Move Sarah to Friday\" or \"Add an extra shift on Saturday evening\"."
+            }])
+            setShowChat(true)
         }
-        return {
-          id: `${s.employee}-${s.day}-${s.startHour}`,
-          employee: s.employee,
-          day: s.day,
-          startHour: s.startHour,
-          endHour: s.endHour,
-          color: employeeColors[s.employee]
+        if (data?.detail) setMessage(data.detail)
+        if (user) {
+            const updated = await apiCall('/me')
+            if (updated) setUser(updated)
         }
-      })
-      setShifts(parsedShifts)
-      setRawSchedule(data.schedule)
-      setActiveTab('calendar')
-      setChatMessages([{
-        role: 'assistant',
-        content: "I've generated your schedule! You can drag shifts to adjust them, or ask me to make changes — like \"Move Sarah to Friday\" or \"Add an extra shift on Saturday evening\"."
-      }])
-      setShowChat(true)
+        setLoading(false)
     }
-    if (data?.detail) setMessage(data.detail)
-    if (user) {
-      const updated = await apiCall('/me')
-      if (updated) setUser(updated)
-    }
-    setLoading(false)
-  }
 
     const sendChatMessage = async () => {
         if (!chatInput.trim() || chatLoading) return
@@ -223,32 +237,32 @@ export default function Dashboard() {
 
         try {
             const data = await apiCall('/chat', 'POST', {
-      message: userMsg,
-      schedule: rawSchedule
-    })
-    const reply = data?.response || "I couldn't process that request."
-    setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
+                message: userMsg,
+                schedule: rawSchedule
+            })
+            const reply = data?.response || "I couldn't process that request."
+            setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
 
-    if (data?.shifts && data.shifts.length > 0) {
-      const employeeColors: Record<string, string> = {}
-      let colorIndex = 0
-      const parsedShifts = data.shifts.map((s: any) => {
-        if (!employeeColors[s.employee]) {
-          employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
-          colorIndex++
-        }
-        return {
-          id: `${s.employee}-${s.day}-${s.startHour}`,
-          employee: s.employee,
-          day: s.day,
-          startHour: s.startHour,
-          endHour: s.endHour,
-          color: employeeColors[s.employee]
-        }
-      })
-      setShifts(parsedShifts)
-      if (data.schedule) setRawSchedule(data.schedule)
-    }
+            if (data?.shifts && data.shifts.length > 0) {
+                const employeeColors: Record<string, string> = {}
+                let colorIndex = 0
+                const parsedShifts = data.shifts.map((s: any) => {
+                    if (!employeeColors[s.employee]) {
+                        employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
+                        colorIndex++
+                    }
+                    return {
+                        id: `${s.employee}-${s.day}-${s.startHour}`,
+                        employee: s.employee,
+                        day: s.day,
+                        startHour: s.startHour,
+                        endHour: s.endHour,
+                        color: employeeColors[s.employee]
+                    }
+                })
+                setShifts(parsedShifts)
+                if (data.schedule) setRawSchedule(data.schedule)
+            }
         } catch {
             setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I had trouble processing that. Please try again.' }])
         }
@@ -278,7 +292,7 @@ export default function Dashboard() {
 
     const employees = [...new Set(shifts.map(s => s.employee))]
     const employeeColorMap: Record<string, string> = {}
-    employees.forEach((emp, i) => {
+    employees.forEach((emp) => {
         const shift = shifts.find(s => s.employee === emp)
         if (shift) employeeColorMap[emp] = shift.color
     })
@@ -409,8 +423,18 @@ export default function Dashboard() {
                                     <svg className="w-4 h-4 text-white/50" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.28 3zm5.72 9.9L7.28 21H16.72l-4.72-8.1zm5.72-9.9L12 12.9 17.72 3H12z" /></svg>
                                 </div>
                                 <div className="text-left">
-                                    <p className="text-sm font-semibold">Google Drive</p>
-                                    <p className="text-xs text-white/30">Connect Drive to import availability files and historical schedules</p>
+                                    <div className="flex items-center gap-2">
+                                        <p className="text-sm font-semibold">Google Drive</p>
+                                        {driveConnected && (
+                                            <span className="flex items-center gap-1 text-xs text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                                Connected
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-white/30">
+                                        {driveConnected ? 'Load your scheduling files below' : 'Connect Drive to import availability files and historical schedules'}
+                                    </p>
                                 </div>
                             </div>
                             <svg className={`w-4 h-4 text-white/30 transition-transform ${showDrive ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -419,13 +443,22 @@ export default function Dashboard() {
                         {showDrive && (
                             <div className="px-6 pb-5 border-t border-white/5 pt-4 fade-up">
                                 <div className="flex gap-3 mb-4">
-                                    <button
-                                        onClick={connectDrive}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all"
-                                    >
-                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.28 3zm5.72 9.9L7.28 21H16.72l-4.72-8.1zm5.72-9.9L12 12.9 17.72 3H12z" /></svg>
-                                        Connect Google Drive
-                                    </button>
+                                    {!driveConnected ? (
+                                        <button
+                                            onClick={connectDrive}
+                                            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all"
+                                        >
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.28 3zm5.72 9.9L7.28 21H16.72l-4.72-8.1zm5.72-9.9L12 12.9 17.72 3H12z" /></svg>
+                                            Connect Google Drive
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={connectDrive}
+                                            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all text-white/40"
+                                        >
+                                            Reconnect
+                                        </button>
+                                    )}
                                     <button
                                         onClick={loadFiles}
                                         className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 text-sm font-medium hover:bg-white/10 transition-all"
@@ -454,6 +487,10 @@ export default function Dashboard() {
                                             </div>
                                         ))}
                                     </div>
+                                )}
+
+                                {files.length === 0 && driveConnected && (
+                                    <p className="text-xs text-white/30 text-center py-4">No scheduling files found. Click "Load files" to browse your Drive.</p>
                                 )}
                             </div>
                         )}
@@ -586,8 +623,8 @@ export default function Dashboard() {
                                         {chatMessages.map((msg, i) => (
                                             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                                 <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${msg.role === 'user'
-                                                        ? 'bg-emerald-400 text-black font-medium rounded-br-sm'
-                                                        : 'bg-white/8 text-white/80 rounded-bl-sm'
+                                                    ? 'bg-emerald-400 text-black font-medium rounded-br-sm'
+                                                    : 'bg-white/8 text-white/80 rounded-bl-sm'
                                                     }`}>
                                                     {msg.content}
                                                 </div>

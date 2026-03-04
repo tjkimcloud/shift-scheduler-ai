@@ -95,7 +95,7 @@ def callback(code: str, state: str, db: Session = Depends(get_db)):
         import json
         db_user.google_credentials = json.dumps(creds_dict)
         db.commit()
-    return RedirectResponse("https://schedio.cloud/dashboard")
+    return RedirectResponse("https://schedio.cloud/dashboard?connected=google")
 
 @app.get("/drive/files")
 def get_files(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
@@ -106,7 +106,19 @@ def get_files(db: Session = Depends(get_db), current_user=Depends(get_current_us
     creds = json.loads(db_user.google_credentials)
     service = get_drive_service(creds)
     files = list_files(service)
-    return {"files": files}
+    
+    # Filter to scheduling-relevant file types only
+    allowed_types = [
+        'application/vnd.google-apps.spreadsheet',      # Google Sheets
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # Excel
+        'text/csv',                                      # CSV
+        'application/vnd.google-apps.document',         # Google Docs
+        'application/pdf',                               # PDF
+        'image/jpeg',                                    # Photo of schedule
+        'image/png',                                     # Photo of schedule
+    ]
+    filtered = [f for f in files if f.get('mimeType') in allowed_types]
+    return {"files": filtered}
 
 @app.post("/drive/ingest/{file_id}")
 def ingest_drive_file(file_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
