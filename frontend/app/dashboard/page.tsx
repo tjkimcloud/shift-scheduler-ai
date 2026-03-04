@@ -65,7 +65,7 @@ function parseScheduleToShifts(scheduleText: string): Shift[] {
 
     for (const line of lines) {
         // Check if line is a day header
-        const dayMatch = DAYS.find(d => line.toLowerCase().includes(d.toLowerCase() + ':'))
+        const dayMatch = DAYS.find(d => line.toLowerCase().includes(d.toLowerCase()))
         if (dayMatch) {
             currentDay = dayMatch
             continue
@@ -176,28 +176,43 @@ export default function Dashboard() {
     }, [chatMessages])
 
     const generateSchedule = async () => {
-        setLoading(true)
-        setShifts([])
-        setRawSchedule('')
-        const data = await apiCall('/generate-schedule', 'POST')
-        if (data?.schedule) {
-            setRawSchedule(data.schedule)
-            const parsed = parseScheduleToShifts(data.schedule)
-            setShifts(parsed)
-            if (parsed.length > 0) setActiveTab('calendar')
-            setChatMessages([{
-                role: 'assistant',
-                content: "I've generated your schedule! You can drag shifts to adjust them, or ask me to make changes — like \"Move Sarah to Friday\" or \"Add an extra shift on Saturday evening\"."
-            }])
-            setShowChat(true)
+    setLoading(true)
+    setShifts([])
+    setRawSchedule('')
+    const data = await apiCall('/generate-schedule', 'POST')
+    if (data?.shifts && data.shifts.length > 0) {
+      const employeeColors: Record<string, string> = {}
+      let colorIndex = 0
+      const parsedShifts = data.shifts.map((s: any) => {
+        if (!employeeColors[s.employee]) {
+          employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
+          colorIndex++
         }
-        if (data?.detail) setMessage(data.detail)
-        if (user) {
-            const updated = await apiCall('/me')
-            if (updated) setUser(updated)
+        return {
+          id: `${s.employee}-${s.day}-${s.startHour}`,
+          employee: s.employee,
+          day: s.day,
+          startHour: s.startHour,
+          endHour: s.endHour,
+          color: employeeColors[s.employee]
         }
-        setLoading(false)
+      })
+      setShifts(parsedShifts)
+      setRawSchedule(data.schedule)
+      setActiveTab('calendar')
+      setChatMessages([{
+        role: 'assistant',
+        content: "I've generated your schedule! You can drag shifts to adjust them, or ask me to make changes — like \"Move Sarah to Friday\" or \"Add an extra shift on Saturday evening\"."
+      }])
+      setShowChat(true)
     }
+    if (data?.detail) setMessage(data.detail)
+    if (user) {
+      const updated = await apiCall('/me')
+      if (updated) setUser(updated)
+    }
+    setLoading(false)
+  }
 
     const sendChatMessage = async () => {
         if (!chatInput.trim() || chatLoading) return
@@ -208,19 +223,32 @@ export default function Dashboard() {
 
         try {
             const data = await apiCall('/chat', 'POST', {
-                message: userMsg,
-                schedule: rawSchedule
-            })
-            const reply = data?.response || "I couldn't process that request."
-            setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
+      message: userMsg,
+      schedule: rawSchedule
+    })
+    const reply = data?.response || "I couldn't process that request."
+    setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
 
-            if (data?.schedule) {
-                const newShifts = parseScheduleToShifts(data.schedule)
-                if (newShifts.length > 2) {
-                    setShifts(newShifts)
-                    setRawSchedule(data.schedule)
-                }
-            }
+    if (data?.shifts && data.shifts.length > 0) {
+      const employeeColors: Record<string, string> = {}
+      let colorIndex = 0
+      const parsedShifts = data.shifts.map((s: any) => {
+        if (!employeeColors[s.employee]) {
+          employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
+          colorIndex++
+        }
+        return {
+          id: `${s.employee}-${s.day}-${s.startHour}`,
+          employee: s.employee,
+          day: s.day,
+          startHour: s.startHour,
+          endHour: s.endHour,
+          color: employeeColors[s.employee]
+        }
+      })
+      setShifts(parsedShifts)
+      if (data.schedule) setRawSchedule(data.schedule)
+    }
         } catch {
             setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I had trouble processing that. Please try again.' }])
         }

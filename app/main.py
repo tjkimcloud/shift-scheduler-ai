@@ -165,10 +165,30 @@ def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_cu
     week_dates = [(monday + timedelta(days=i)).strftime('%A, %m/%d/%Y') for i in range(7)]
     week_str = "\n".join(week_dates)
     
+    # Generate human-readable schedule
     schedule = generate_completion(
         prompt=f"Here is the employee availability:\n\n{availability}\n\nPlease create a weekly schedule for the following week:\n{week_str}\n\nLabel each day with its full date (e.g. 'Monday, 03/02/2026'). Business hours are 9am to 10pm.",
         system="You are a scheduling assistant for small businesses. Create a fair weekly schedule based on employee availability. Always include the full date with each day."
     )
+    
+    # Convert to structured JSON for the calendar
+    from openai import OpenAI
+    client = OpenAI()
+    json_response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Convert the schedule to JSON. Return ONLY valid JSON, no markdown, no backticks, no explanation. Format: {\"shifts\": [{\"employee\": \"Name\", \"day\": \"Monday\", \"startHour\": 9, \"endHour\": 17}]}"},
+            {"role": "user", "content": schedule}
+        ]
+    )
+    
+    import json
+    try:
+        schedule_json = json.loads(json_response.choices[0].message.content)
+    except:
+        schedule_json = {"shifts": []}
+    
+    return {"schedule": schedule, "shifts": schedule_json["shifts"]}
     
     db_schedule = models.Schedule(
         user_id=current_user.id,
@@ -201,12 +221,11 @@ class ChatRequest(BaseModel):
 def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     from openai import OpenAI
     from datetime import datetime
+    import json
     client = OpenAI()
     
-    # Get embedding for the user's question
     question_embedding = get_embeddings([request.message])[0]
     
-    # Vector similarity search - find most relevant chunks
     relevant_chunks = db.execute(
         """
         SELECT content, source, 
@@ -227,21 +246,35 @@ def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depen
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": f"You are a friendly scheduling assistant. Current schedule:\n\n{request.schedule}\n\nHistorical availability and schedule data:\n\n{historical_context}\n\nYou can: add/remove employees, adjust shifts, answer questions about employee history and availability from the data provided. When making schedule changes, respond in exactly this format:\nCONFIRM: [1 sentence confirmation]\nSCHEDULE:\n[full updated schedule]\n\nFor questions (not changes), just answer conversationally in 1-2 sentences. Only decline requests completely unrelated to scheduling or employees."},
+            {"role": "system", "content": f"You are a friendly scheduling assistant. Today is {datetime.now().strftime('%B %d, %Y')}.\n\nCurrent schedule:\n\n{request.schedule}\n\nRelevant historical data:\n\n{historical_context}\n\nYou can: add/remove employees, adjust shifts, answer questions about employee history. When making schedule changes, respond in exactly this format:\nCONFIRM: [1 sentence confirmation]\nSCHEDULE:\n[full updated schedule]\n\nFor questions, just answer in 1-2 sentences. Only decline unrelated requests."},
             {"role": "user", "content": request.message}
         ]
     )
-    full_response = response.choices[0].message.content
     
-    # Split confirmation from schedule
+    full_response = response.choices[0].message.content
     confirm = full_response
-    schedule = ""
+    schedule_text = ""
+    shifts = []
+    
     if "SCHEDULE:" in full_response:
         parts = full_response.split("SCHEDULE:", 1)
         confirm = parts[0].replace("CONFIRM:", "").strip()
-        schedule = parts[1].strip()
+        schedule_text = parts[1].strip()
+        
+        # Convert updated schedule to JSON
+        json_response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Convert the schedule to JSON. Return ONLY valid JSON, no markdown, no backticks. Format: {\"shifts\": [{\"employee\": \"Name\", \"day\": \"Monday\", \"startHour\": 9, \"endHour\": 17}]}"},
+                {"role": "user", "content": schedule_text}
+            ]
+        )
+        try:
+            shifts = json.loads(json_response.choices[0].message.content).get("shifts", [])
+        except:
+            shifts = []
     
-    return {"response": confirm, "schedule": schedule}
+    return {"response": confirm, "schedule": schedule_text, "shifts": shifts}
 
 @app.get("/schedules")
 def get_schedules(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
