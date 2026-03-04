@@ -169,37 +169,37 @@ resource "aws_ecs_task_definition" "app" {
       protocol      = "tcp"
     }]
     secrets = [
-  {
-    name      = "DATABASE_URL"
-    valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/database-url"
-  },
-  {
-    name      = "SUPABASE_SECRET_KEY"
-    valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/supabase-secret-key"
-  },
-  {
-    name      = "OPENAI_API_KEY"
-    valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/openai-api-key"
-  },
-  {
-  name      = "GOOGLE_CLIENT_SECRET"
-  valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/google-client-secret"
-},
-],
-environment = [
-  {
-    name  = "SUPABASE_URL"
-    value = "https://crlxxfixvjmksvzhcuwm.supabase.co"
-  },
-  {
-    name  = "LLM_PROVIDER"
-    value = "openai"
-  },
-  {
-  name  = "GOOGLE_CLIENT_ID"
-  value = "300853808279-82ekv3tleml9kad7el5tabg1sggqd9f3.apps.googleusercontent.com"
-},
-]
+      {
+        name      = "DATABASE_URL"
+        valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/database-url"
+      },
+      {
+        name      = "SUPABASE_SECRET_KEY"
+        valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/supabase-secret-key"
+      },
+      {
+        name      = "OPENAI_API_KEY"
+        valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/openai-api-key"
+      },
+      {
+        name      = "GOOGLE_CLIENT_SECRET"
+        valueFrom = "arn:aws:secretsmanager:us-east-1:222727886543:secret:schedio/google-client-secret-U7LCVY"
+      }
+    ]
+    environment = [
+      {
+        name  = "SUPABASE_URL"
+        value = "https://crlxxfixvjmksvzhcuwm.supabase.co"
+      },
+      {
+        name  = "LLM_PROVIDER"
+        value = "openai"
+      },
+      {
+        name  = "GOOGLE_CLIENT_ID"
+        value = "300853808279-82ekv3tleml9kad7el5tabg1sggqd9f3.apps.googleusercontent.com"
+      }
+    ]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -309,11 +309,12 @@ resource "aws_lb_listener" "https" {
 
 # ECS Service
 resource "aws_ecs_service" "app" {
-  name            = "shift-scheduler-ai-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.app.arn
-  desired_count   = 2
-  launch_type     = "FARGATE"
+  name                 = "shift-scheduler-ai-service"
+  cluster              = aws_ecs_cluster.main.id
+  task_definition      = aws_ecs_task_definition.app.arn
+  desired_count        = 2
+  launch_type          = "FARGATE"
+  force_new_deployment = true
 
   network_configuration {
     subnets          = [aws_subnet.public_a.id, aws_subnet.public_b.id]
@@ -328,6 +329,19 @@ resource "aws_ecs_service" "app" {
   }
 
   depends_on = [aws_lb_listener.http]
+}
+
+# Route 53 - api.schedio.cloud → ALB (auto-updates when ALB changes)
+resource "aws_route53_record" "api" {
+  zone_id = "Z07816942PMI5KRX0M942"
+  name    = "api.schedio.cloud"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.main.dns_name
+    zone_id                = aws_lb.main.zone_id
+    evaluate_target_health = true
+  }
 }
 
 # Output the ALB DNS name
