@@ -410,15 +410,19 @@ def get_me(db: Session = Depends(get_db), current_user=Depends(get_current_user)
         "max_locations": db_user.max_locations or FREE_TIER_LOCATION_LIMIT
     }
 
+class CheckoutRequest(BaseModel):
+    plan: str = "pro"
+
 @app.post("/billing/checkout")
-def checkout(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def checkout(request: CheckoutRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     
     checkout_url = create_checkout_session(
         user_id=current_user.id,
-        email=db_user.email
+        email=db_user.email,
+        plan=request.plan
     )
     return {"checkout_url": checkout_url}
 

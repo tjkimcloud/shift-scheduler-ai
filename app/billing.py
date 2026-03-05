@@ -6,26 +6,31 @@ load_dotenv()
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 PRO_PRICE_ID = os.getenv("STRIPE_PRO_PRICE_ID")
+BUSINESS_PRICE_ID = os.getenv("STRIPE_BUSINESS_PRICE_ID")
 
-def create_checkout_session(user_id: str, email: str) -> str:
+BASE_URL = os.getenv("NEXT_PUBLIC_APP_URL", "https://schedio.cloud")
+
+def create_checkout_session(user_id: str, email: str, plan: str = "pro") -> str:
+    price_id = BUSINESS_PRICE_ID if plan == "business" else PRO_PRICE_ID
+
     session = stripe.checkout.Session.create(
         payment_method_types=["card"],
         line_items=[{
-            "price": PRO_PRICE_ID,
+            "price": price_id,
             "quantity": 1
         }],
         mode="subscription",
-        success_url="http://localhost:3000/success?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url="http://localhost:3000/cancel",
+        success_url=f"{BASE_URL}/dashboard?upgraded=true",
+        cancel_url=f"{BASE_URL}/upgrade",
         customer_email=email,
-        metadata={"user_id": user_id}
+        metadata={"user_id": user_id, "plan": plan}
     )
     return session.url
 
 def create_portal_session(stripe_customer_id: str) -> str:
     session = stripe.billing_portal.Session.create(
         customer=stripe_customer_id,
-        return_url="http://localhost:3000/dashboard"
+        return_url=f"{BASE_URL}/dashboard"
     )
     return session.url
 

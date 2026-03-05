@@ -509,7 +509,7 @@ export default function Home() {
             </div>
 
             {/* Pro */}
-            <div className="card-hover relative border border-emerald-400/40 rounded-2xl p-8 bg-emerald-400/4 overflow-hidden">
+            <div className="card-hover relative border border-emerald-400/40 rounded-2xl p-8 bg-emerald-400/4 mt-4">
               <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-emerald-400/50 to-transparent" />
               <div className="plan-popular">MOST POPULAR</div>
               <div className="mono text-xs text-emerald-400 uppercase tracking-widest mb-6 mt-2">Pro Plan</div>
