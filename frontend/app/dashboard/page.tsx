@@ -339,7 +339,7 @@ export default function Dashboard() {
                         <div className="w-8 h-8 bg-emerald-400 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-400/20">
                             <span className="text-black font-black text-sm" style={{ fontFamily: 'Syne, sans-serif' }}>S</span>
                         </div>
-                        <span className="font-bold tracking-tight text-lg">Schedio</span>
+                        <span className="font-bold tracking-tight text-lg" style={{fontFamily: 'Syne, sans-serif'}}>Schedio</span>
                     </Link>
                     <div className="flex items-center gap-3">
                         {user && <span className="text-sm text-white/30 mono">{user.email}</span>}
