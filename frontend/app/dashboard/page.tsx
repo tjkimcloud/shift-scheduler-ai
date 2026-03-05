@@ -79,6 +79,8 @@ export default function Dashboard() {
     const [ingesting, setIngesting] = useState<string | null>(null)
     const [driveConnected, setDriveConnected] = useState(false)
     const [finalizing, setFinalizing] = useState(false)
+    const [showUpgradePrompt, setShowUpgradePrompt] = useState(false)
+    const [lockedEmployees, setLockedEmployees] = useState<string[]>([])
 
     // Location state
     const [locations, setLocations] = useState<Location[]>([])
@@ -211,6 +213,15 @@ export default function Dashboard() {
                     color: employeeColors[s.employee]
                 }
             })
+            const uniqueEmps: string[] = Array.from(new Set<string>(parsedShifts.map((s: any) => s.employee as string)))
+            const limit = user?.max_employees || 5
+            if (!user?.is_pro && uniqueEmps.length > limit) {
+                setShowUpgradePrompt(true)
+                setLockedEmployees(uniqueEmps.slice(limit))
+            } else {
+                setShowUpgradePrompt(false)
+                setLockedEmployees([])
+            }
             setShifts(parsedShifts)
             setRawSchedule(data.schedule)
             setActiveTab('calendar')
@@ -625,6 +636,18 @@ export default function Dashboard() {
                                     </button>
                                 </div>
 
+                                {showUpgradePrompt && (
+                                    <div className="mb-4 border border-emerald-400/30 rounded-2xl px-6 py-4 bg-emerald-400/5 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-semibold text-white">Your schedule has {[...new Set(shifts.map(s => s.employee))].length} employees</p>
+                                            <p className="text-xs text-white/40 mt-0.5">Free plan is limited to {user?.max_employees || 5} employees. {lockedEmployees.length} shifts are hidden.</p>
+                                        </div>
+                                        <Link href="/upgrade" className="btn-primary bg-emerald-400 text-black font-bold px-5 py-2 rounded-xl text-sm whitespace-nowrap">
+                                            Upgrade to Pro →
+                                        </Link>
+                                    </div>
+                                )}
+
                                 {activeTab === 'calendar' ? (
                                     <div className="border border-white/8 rounded-2xl overflow-hidden bg-[#0d0d0d]">
                                         <div className="grid border-b border-white/8" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
@@ -661,25 +684,26 @@ export default function Dashboard() {
                                                                 onDrop={() => handleDrop(day, hour)}
                                                             />
                                                         ))}
-                                                        {shifts.filter(s => s.day === day).map(shift => (
-                                                            <div
-                                                                key={shift.id}
-                                                                draggable
-                                                                onDragStart={() => handleDragStart(shift.id)}
-                                                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                                                                onDrop={(e) => { e.stopPropagation(); handleDrop(day, shift.startHour); }}
-                                                                className={`shift-block absolute left-1 right-1 rounded-lg border ${shift.color} px-2 py-1 overflow-hidden`}
-                                                                style={{
-                                                                    top: `${(shift.startHour - 6) * HOUR_HEIGHT + 2}px`,
-                                                                    height: `${(shift.endHour - shift.startHour) * HOUR_HEIGHT - 4}px`,
-                                                                }}
-                                                            >
-                                                                <p className="text-xs font-semibold text-white leading-tight truncate">{shift.employee}</p>
-                                                                <p className="text-xs text-white/60 mono">
-                                                                    {shift.startHour > 12 ? shift.startHour - 12 : shift.startHour}{shift.startHour >= 12 ? 'pm' : 'am'} – {shift.endHour > 12 ? shift.endHour - 12 : shift.endHour}{shift.endHour >= 12 ? 'pm' : 'am'}
-                                                                </p>
-                                                            </div>
-                                                        ))}
+                                                        {shifts.filter(s => s.day === day).map(shift => {
+                                                            const isLocked = lockedEmployees.includes(shift.employee)
+                                                            return (
+                                                                <div
+                                                                    key={shift.id}
+                                                                    draggable={!isLocked}
+                                                                    onDragStart={() => !isLocked && handleDragStart(shift.id)}
+                                                                    className={`shift-block absolute left-1 right-1 rounded-lg border ${shift.color} px-2 py-1 overflow-hidden ${isLocked ? 'opacity-30 blur-sm cursor-not-allowed' : ''}`}
+                                                                    style={{
+                                                                        top: `${(shift.startHour - 6) * HOUR_HEIGHT + 2}px`,
+                                                                        height: `${(shift.endHour - shift.startHour) * HOUR_HEIGHT - 4}px`,
+                                                                    }}
+                                                                >
+                                                                    <p className="text-xs font-semibold text-white leading-tight truncate">{isLocked ? '••••••' : shift.employee}</p>
+                                                                    <p className="text-xs text-white/60 mono">
+                                                                        {isLocked ? '•• – ••' : `${shift.startHour > 12 ? shift.startHour - 12 : shift.startHour}${shift.startHour >= 12 ? 'pm' : 'am'} – ${shift.endHour > 12 ? shift.endHour - 12 : shift.endHour}${shift.endHour >= 12 ? 'pm' : 'am'}`}
+                                                                    </p>
+                                                                </div>
+                                                            )
+                                                        })}
                                                     </div>
                                                 ))}
                                             </div>
