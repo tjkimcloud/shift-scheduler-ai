@@ -314,30 +314,30 @@ export default function Dashboard() {
     return (
         <>
             <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@400;500;600;700;800&display=swap');
-        * { font-family: 'Outfit', sans-serif; }
-        .mono { font-family: 'DM Mono', monospace; }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        .fade-up { animation: fadeUp 0.3s ease forwards; }
-        @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.3); } 50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } }
-        .glow-pulse { animation: pulse-glow 2s infinite; }
-        .shift-block { cursor: grab; transition: opacity 0.15s, transform 0.15s; }
-        .shift-block:active { cursor: grabbing; opacity: 0.7; transform: scale(0.97); }
-        .drop-zone { transition: background 0.1s; }
-        .drop-zone:hover { background: rgba(255,255,255,0.04); }
-        @media print {
-          .no-print { display: none !important; }
-          .print-area { break-inside: avoid; }
-          body { background: white !important; color: black !important; }
-        }
-      `}</style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@800&family=Outfit:wght@400;500;600;700;800&display=swap');
+    * { font-family: 'Outfit', sans-serif; }
+    .mono { font-family: 'DM Mono', monospace; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-up { animation: fadeUp 0.3s ease forwards; }
+    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.3); } 50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } }
+    .glow-pulse { animation: pulse-glow 2s infinite; }
+    .shift-block { cursor: grab; transition: opacity 0.15s, transform 0.15s; }
+    .shift-block:active { cursor: grabbing; opacity: 0.7; transform: scale(0.97); }
+    .drop-zone { transition: background 0.1s; }
+    .drop-zone:hover { background: rgba(255,255,255,0.04); }
+    @media print {
+      .no-print { display: none !important; }
+      .print-area { break-inside: avoid; }
+      body { background: white !important; color: black !important; }
+    }
+`}</style>
 
             <main className="min-h-screen bg-[#080808] text-white">
                 {/* Nav */}
                 <nav className="no-print flex items-center justify-between px-8 py-4 border-b border-white/5 bg-[#080808]/80 backdrop-blur-md sticky top-0 z-50">
                     <Link href="/" className="flex items-center gap-3">
                         <div className="w-8 h-8 bg-emerald-400 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-400/20">
-                            <span className="text-black font-black text-sm">S</span>
+                            <span className="text-black font-black text-sm" style={{ fontFamily: 'Syne, sans-serif' }}>S</span>
                         </div>
                         <span className="font-bold tracking-tight text-lg">Schedio</span>
                     </Link>
@@ -368,8 +368,8 @@ export default function Dashboard() {
                                     key={loc.id}
                                     onClick={() => setActiveLocationId(loc.id)}
                                     className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-all border ${activeLocationId === loc.id
-                                            ? 'bg-emerald-400/10 border-emerald-400/40 text-emerald-400'
-                                            : 'border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
+                                        ? 'bg-emerald-400/10 border-emerald-400/40 text-emerald-400'
+                                        : 'border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
                                         }`}
                                 >
                                     {loc.name}
