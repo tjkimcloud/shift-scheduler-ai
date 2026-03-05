@@ -263,17 +263,8 @@ def generate_schedule(location_id: str = None, db: Session = Depends(get_db), cu
     except:
         schedule_json = {"shifts": []}
 
-    # Enforce employee limit on returned shifts as a safety net
-    if not db_user.is_pro:
-        unique_employees = []
-        filtered_shifts = []
-        for shift in schedule_json.get("shifts", []):
-            if shift["employee"] not in unique_employees:
-                if len(unique_employees) < max_employees:
-                    unique_employees.append(shift["employee"])
-            if shift["employee"] in unique_employees:
-                filtered_shifts.append(shift)
-        schedule_json["shifts"] = filtered_shifts
+    total_employees = len(set(s["employee"] for s in schedule_json.get("shifts", [])))
+    employee_limit_hit = not db_user.is_pro and total_employees > max_employees
 
     # Save schedule to DB
     db_schedule = models.Schedule(
@@ -286,7 +277,13 @@ def generate_schedule(location_id: str = None, db: Session = Depends(get_db), cu
     db_user.schedules_this_month += 1
     db.commit()
 
-    return {"schedule": schedule, "shifts": schedule_json["shifts"]}
+    return {
+        "shifts": schedule_json.get("shifts", []),
+        "schedule": schedule,
+        "employee_limit_hit": employee_limit_hit,
+        "total_employees": total_employees,
+        "max_employees": max_employees
+    }
 
 class FinalizeRequest(BaseModel):
     schedule: str
