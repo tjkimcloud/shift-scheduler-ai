@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
@@ -291,92 +292,251 @@ class FinalizeRequest(BaseModel):
     schedule: str
     location_id: str = None
 
+class FinalizeRequest(BaseModel):
+    schedule: str
+    location_id: str = None
+    week_start: str = None  # ISO date string from frontend e.g. "2026-03-02"
+
+
 @app.post("/finalize-schedule")
 def finalize_schedule(request: FinalizeRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    from datetime import datetime, timedelta
+    from openai import OpenAI
+    from datetime import datetime, timedelta, date
+    import json
 
-    today = datetime.now()
-    monday = today - timedelta(days=today.weekday())
-    week_dates = [(monday + timedelta(days=i)).strftime('%A, %m/%d/%Y') for i in range(7)]
+    client = OpenAI()
 
-    schedule_embeddings = get_embeddings([request.schedule])
-    schedule_chunk = models.DocumentChunk(
-        user_id=current_user.id,
-        content=f"Finalized schedule for week of {week_dates[0]} through {week_dates[6]}:\n{request.schedule}",
-        embedding=schedule_embeddings[0],
-        source=f"Finalized Schedule - {week_dates[0]}",
-        location_id=request.location_id
+    # Use frontend-provided week_start (user's local date) or fall back to server
+    if request.week_start:
+        monday = date.fromisoformat(request.week_start)
+    else:
+        today = datetime.now().date()
+        monday = today - timedelta(days=today.weekday())
+
+    week_dates = [(monday + timedelta(days=i)) for i in range(7)]
+    week_label = f"Week of {monday.strftime('%m/%d/%Y')}"
+
+    # Parse the schedule into per-employee chunks using GPT
+    parse_response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": """Parse this schedule into a JSON array of employees with their shifts.
+Return ONLY valid JSON, no markdown, no backticks.
+Format: {"employees": [{"name": "Tony Kim", "shifts": [{"day": "Monday", "startHour": 16, "endHour": 22}, ...]}]}"""},
+            {"role": "user", "content": request.schedule}
+        ]
     )
-    db.add(schedule_chunk)
+
+    try:
+        parsed = json.loads(parse_response.choices[0].message.content)
+        employees = parsed.get("employees", [])
+    except:
+        employees = []
+
+    # Map day names to actual dates
+    day_to_date = {
+        week_dates[0].strftime('%A'): week_dates[0],
+        week_dates[1].strftime('%A'): week_dates[1],
+        week_dates[2].strftime('%A'): week_dates[2],
+        week_dates[3].strftime('%A'): week_dates[3],
+        week_dates[4].strftime('%A'): week_dates[4],
+        week_dates[5].strftime('%A'): week_dates[5],
+        week_dates[6].strftime('%A'): week_dates[6],
+    }
+
+    # Delete any existing schedule history for this week/location to prevent duplicates
+    db.execute(
+        text("""
+            DELETE FROM document_chunks
+            WHERE user_id = :user_id
+              AND location_id IS NOT DISTINCT FROM :location_id
+              AND chunk_type = 'schedule_history'
+              AND week_start = :week_start
+        """),
+        {
+            "user_id": current_user.id,
+            "location_id": request.location_id,
+            "week_start": monday.isoformat()
+        }
+    )
     db.commit()
 
-    return {"message": "Schedule finalized and saved successfully."}
+    # Save one chunk per employee with real dates
+    chunks_saved = 0
+    for emp in employees:
+        name = emp.get("name", "Unknown")
+        shifts = emp.get("shifts", [])
+        if not shifts:
+            continue
+
+        # Build human-readable content with real dates
+        shift_lines = []
+        for shift in shifts:
+            day_name = shift.get("day", "")
+            actual_date = day_to_date.get(day_name)
+            if actual_date:
+                date_str = actual_date.strftime('%A %m/%d/%Y')
+            else:
+                date_str = day_name
+
+            start = shift.get("startHour", 0)
+            end = shift.get("endHour", 0)
+            start_str = f"{start - 12 if start > 12 else start}{'pm' if start >= 12 else 'am'}"
+            end_str = f"{end - 12 if end > 12 else end}{'pm' if end >= 12 else 'am'}"
+            shift_lines.append(f"  {date_str}: {start_str} – {end_str}")
+
+        content = f"{name} — {week_label}\n" + "\n".join(shift_lines)
+
+        embedding = get_embeddings([content])[0]
+        chunk = models.DocumentChunk(
+            user_id=current_user.id,
+            content=content,
+            embedding=embedding,
+            source=f"Schedule History — {name} — {week_label}",
+            location_id=request.location_id,
+            chunk_type="schedule_history",
+            week_start=monday
+        )
+        db.add(chunk)
+        chunks_saved += 1
+
+    db.commit()
+    return {"message": f"Schedule finalized and saved. {chunks_saved} employee records stored."}
+
 
 class ChatRequest(BaseModel):
     message: str
     schedule: str
     location_id: str = None
+    client_date: str = None  # ISO date string from frontend e.g. "2026-03-05"
+
 
 @app.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     from openai import OpenAI
-    from datetime import datetime
+    from datetime import datetime, timedelta, date
     from sqlalchemy import text
     import json
-    client = OpenAI()
-    
-    question_embedding = get_embeddings([request.message])[0]
 
-    # Scope RAG search to location if provided
+    client = OpenAI()
+
+    # Resolve client date
+    if request.client_date:
+        today = date.fromisoformat(request.client_date)
+    else:
+        today = datetime.now().date()
+
+    # Calculate useful date references to inject into the query
+    last_monday = today - timedelta(days=today.weekday() + 7)
+    this_monday = today - timedelta(days=today.weekday())
+    last_thursday = last_monday + timedelta(days=3)
+    last_sunday = last_monday + timedelta(days=6)
+
+    date_context = f"""Today is {today.strftime('%A, %m/%d/%Y')}.
+This week starts: {this_monday.strftime('%m/%d/%Y')}
+Last week: {last_monday.strftime('%m/%d/%Y')} through {last_sunday.strftime('%m/%d/%Y')}
+Last Monday: {last_monday.strftime('%m/%d/%Y')}
+Last Tuesday: {(last_monday + timedelta(days=1)).strftime('%m/%d/%Y')}
+Last Wednesday: {(last_monday + timedelta(days=2)).strftime('%m/%d/%Y')}
+Last Thursday: {last_thursday.strftime('%m/%d/%Y')}
+Last Friday: {(last_monday + timedelta(days=4)).strftime('%m/%d/%Y')}
+Last Saturday: {(last_monday + timedelta(days=5)).strftime('%m/%d/%Y')}
+Last Sunday: {last_sunday.strftime('%m/%d/%Y')}"""
+
+    # Detect if this is a history question or a scheduling question
+    intent_response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Classify the user's message as either 'history' (asking about past shifts, who worked when, hours worked) or 'scheduling' (making changes to the current schedule, adding/removing shifts). Reply with only one word: history or scheduling."},
+            {"role": "user", "content": request.message}
+        ]
+    )
+    intent = intent_response.choices[0].message.content.strip().lower()
+    chunk_type_filter = "schedule_history" if intent == "history" else "availability"
+
+    # Augment the query with resolved dates for better vector search
+    augmented_query = f"{request.message} {today.strftime('%m/%d/%Y')}"
+    question_embedding = get_embeddings([augmented_query])[0]
+
+    # Search only the relevant chunk type
     if request.location_id:
         relevant_chunks = db.execute(
             text("""
-            SELECT content, source, 
+            SELECT content, source,
                    1 - (embedding <=> :embedding) as similarity
-            FROM document_chunks 
+            FROM document_chunks
             WHERE user_id = :user_id
               AND location_id = :location_id
+              AND chunk_type = :chunk_type
             ORDER BY embedding <=> :embedding
             LIMIT 5
             """),
-            {"embedding": str(question_embedding), "user_id": current_user.id, "location_id": request.location_id}
+            {
+                "embedding": str(question_embedding),
+                "user_id": current_user.id,
+                "location_id": request.location_id,
+                "chunk_type": chunk_type_filter
+            }
         ).fetchall()
     else:
         relevant_chunks = db.execute(
             text("""
-            SELECT content, source, 
+            SELECT content, source,
                    1 - (embedding <=> :embedding) as similarity
-            FROM document_chunks 
+            FROM document_chunks
             WHERE user_id = :user_id
+              AND chunk_type = :chunk_type
             ORDER BY embedding <=> :embedding
             LIMIT 5
             """),
-            {"embedding": str(question_embedding), "user_id": current_user.id}
+            {
+                "embedding": str(question_embedding),
+                "user_id": current_user.id,
+                "chunk_type": chunk_type_filter
+            }
         ).fetchall()
-    
+
     historical_context = "\n\n".join([
-        f"[Source: {chunk.source}]\n{chunk.content}" 
+        f"[Source: {chunk.source}]\n{chunk.content}"
         for chunk in relevant_chunks
     ]) if relevant_chunks else ""
-    
+
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": f"You are a friendly scheduling assistant. Today is {datetime.now().strftime('%B %d, %Y')}.\n\nCurrent schedule:\n\n{request.schedule}\n\nRelevant historical data:\n\n{historical_context}\n\nYou can freely add new employees with whatever hours the user specifies, remove employees, adjust shifts, and make any scheduling changes. Never ask for qualifications or availability before making changes — just do it. When making schedule changes, respond in exactly this format:\nCONFIRM: [1 sentence confirmation]\nSCHEDULE:\n[full updated schedule]\n\nFor questions, just answer in 1-2 sentences. Only decline requests completely unrelated to scheduling."},
+            {"role": "system", "content": f"""You are a friendly scheduling assistant.
+
+{date_context}
+
+Current schedule:
+{request.schedule}
+
+Relevant context ({chunk_type_filter.replace('_', ' ')}):
+{historical_context}
+
+You can freely add new employees, remove employees, adjust shifts, and make any scheduling changes. Never ask for qualifications or availability before making changes — just do it.
+
+When making schedule changes, respond in exactly this format:
+CONFIRM: [1 sentence confirmation]
+SCHEDULE:
+[full updated schedule]
+
+For history questions, answer directly and confidently using the context above. Reference exact dates in your answer (e.g. "Yes, Tony worked on Thursday 2/27/2026 from 4pm to 10pm").
+For questions unrelated to scheduling, politely redirect."""},
             {"role": "user", "content": request.message}
         ]
     )
-    
+
     full_response = response.choices[0].message.content
     confirm = full_response
     schedule_text = ""
     shifts = []
-    
+
     if "SCHEDULE:" in full_response:
         parts = full_response.split("SCHEDULE:", 1)
         confirm = parts[0].replace("CONFIRM:", "").strip()
         schedule_text = parts[1].strip()
-        
+
         json_response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -388,7 +548,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depen
             shifts = json.loads(json_response.choices[0].message.content).get("shifts", [])
         except:
             shifts = []
-    
+
     return {"response": confirm, "schedule": schedule_text, "shifts": shifts}
 
 @app.get("/schedules")

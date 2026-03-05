@@ -52,3 +52,5 @@ class DocumentChunk(Base):
     source = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     location_id = Column(UUID(as_uuid=True), ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
+    chunk_type = Column(String, default="availability")
+    week_start = Column(DateTime(timezone=False), nullable=True)

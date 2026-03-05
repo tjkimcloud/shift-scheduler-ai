@@ -228,17 +228,23 @@ export default function Dashboard() {
     }
 
     const finalizeSchedule = async () => {
-        if (!rawSchedule) {
-            setMessage('⚠️ No schedule to finalize. Generate a schedule first.')
-            return
-        }
-        const data = await apiCall('/finalize-schedule', 'POST', {
-            schedule: rawSchedule,
-            location_id: activeLocationId
-        })
-        if (data?.message) setMessage('✅ Schedule finalized and saved!')
-        if (data?.detail) setMessage(`❌ ${data.detail}`)
+    if (!rawSchedule) {
+        setMessage('⚠️ No schedule to finalize. Generate a schedule first.')
+        return
     }
+    const today = new Date()
+    const monday = new Date(today)
+    monday.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1))
+    const weekStart = monday.toISOString().split('T')[0]
+
+    const data = await apiCall('/finalize-schedule', 'POST', {
+        schedule: rawSchedule,
+        location_id: activeLocationId,
+        week_start: weekStart
+    })
+    if (data?.message) setMessage(`✅ ${data.message}`)
+    if (data?.detail) setMessage(`❌ ${data.detail}`)
+}
 
     const sendChatMessage = async () => {
         if (!chatInput.trim() || chatLoading) return
