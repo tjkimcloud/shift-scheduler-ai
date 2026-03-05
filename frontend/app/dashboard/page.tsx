@@ -268,7 +268,12 @@ export default function Dashboard() {
     }
 
     const sendChatMessage = async () => {
-        if (!chatInput.trim() || chatLoading) return
+    if (!chatInput.trim() || chatLoading) return
+    if (showUpgradePrompt) {
+        setChatMessages(prev => [...prev, { role: 'assistant', content: 'Upgrade to Pro to access the AI assistant and view your full schedule.' }])
+        setChatInput('')
+        return
+    }
         const userMsg = chatInput.trim()
         setChatInput('')
         setChatMessages(prev => [...prev, { role: 'user', content: userMsg }])
