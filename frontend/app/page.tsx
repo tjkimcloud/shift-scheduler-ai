@@ -40,7 +40,6 @@ function ScheduleDemo() {
 
   return (
     <div className="relative w-full rounded-2xl overflow-hidden border border-white/10 bg-[#0d0d0d]" style={{ fontFamily: 'DM Mono, monospace' }}>
-      {/* Header */}
       <div className="flex border-b border-white/8">
         <div className="w-16 shrink-0 border-r border-white/5" />
         {DAYS.map(d => (
@@ -49,17 +48,12 @@ function ScheduleDemo() {
           </div>
         ))}
       </div>
-
-      {/* Grid */}
       <div className="relative" style={{ height: 200 }}>
-        {/* Hour lines */}
         {[9, 12, 15, 18, 21].map(h => (
           <div key={h} className="absolute left-0 right-0 border-t border-white/4 flex items-center" style={{ top: `${((h - START_HOUR) / TOTAL_HOURS) * 100}%` }}>
             <span className="text-white/15 text-xs w-16 text-right pr-2">{h > 12 ? `${h-12}pm` : h === 12 ? '12pm' : `${h}am`}</span>
           </div>
         ))}
-
-        {/* Columns */}
         <div className="absolute inset-0 flex ml-16">
           {DAYS.map(day => (
             <div key={day} className="flex-1 relative border-r border-white/5 last:border-0">
@@ -258,6 +252,22 @@ export default function Home() {
           top: -10px;
           right: 16px;
         }
+
+        .plan-popular {
+          position: absolute;
+          top: -12px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #34d399;
+          color: black;
+          font-size: 11px;
+          font-weight: 800;
+          padding: 3px 14px;
+          border-radius: 999px;
+          font-family: 'DM Mono', monospace;
+          letter-spacing: 0.05em;
+          white-space: nowrap;
+        }
       `}</style>
 
       {/* Cursor glow */}
@@ -306,9 +316,7 @@ export default function Home() {
             <a href="#tech" className="text-sm text-white/40 hover:text-white transition-colors">Technology</a>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="text-sm text-white/40 hover:text-white transition-colors">
-              Sign in
-            </Link>
+            <Link href="/login" className="text-sm text-white/40 hover:text-white transition-colors">Sign in</Link>
             <Link href="/register" className="btn-primary text-sm bg-emerald-400 text-black font-bold px-5 py-2 rounded-xl">
               Get started free →
             </Link>
@@ -317,7 +325,6 @@ export default function Home() {
 
         {/* Hero */}
         <section className="relative grid-bg px-8 pt-20 pb-8 max-w-7xl mx-auto">
-          {/* Glow orbs */}
           <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-emerald-500/6 rounded-full blur-3xl pointer-events-none" style={{ animation: 'glow-pulse 4s ease infinite' }} />
           <div className="absolute top-20 right-1/4 w-[300px] h-[300px] bg-blue-500/4 rounded-full blur-3xl pointer-events-none" style={{ animation: 'glow-pulse 6s ease infinite 2s' }} />
 
@@ -354,11 +361,10 @@ export default function Home() {
             </div>
 
             <p className="fade-up-5 mono text-sm text-white/20">
-              Free plan · No credit card · 3 schedules/month
+              Free plan · No credit card · Up to 5 employees
             </p>
           </div>
 
-          {/* Live schedule demo */}
           <div className="fade-up-5 mt-16 relative">
             <div className="absolute -top-3 left-6 bg-emerald-400 text-black text-xs font-black px-3 py-1 rounded-full mono z-10">
               LIVE PREVIEW
@@ -374,7 +380,7 @@ export default function Home() {
         {/* Ticker */}
         <div className="border-y border-white/5 py-3 my-8 ticker-wrap bg-white/2">
           <div className="ticker mono text-sm text-white/20">
-            {Array(6).fill('Restaurant Scheduling · Retail Staffing · Hourly Workers · AI-Powered · Google Drive Integration · Drag & Drop Editor · PDF Export · Multi-tenant · AWS ECS · PostgreSQL · ').join('')}
+            {Array(6).fill('Restaurant Scheduling · Retail Staffing · Hourly Workers · AI-Powered · Google Drive Integration · Drag & Drop Editor · Multi-Location · AWS ECS · PostgreSQL · ').join('')}
           </div>
         </div>
 
@@ -410,25 +416,19 @@ export default function Home() {
                 step: '01',
                 title: 'Connect Google Drive',
                 desc: 'Link your Drive and point Schedio to availability spreadsheets, handwritten notes, or any docs your team submits.',
-                icon: (
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.28 3zm5.72 9.9L7.28 21H16.72l-4.72-8.1zm5.72-9.9L12 12.9 17.72 3H12z"/></svg>
-                )
+                icon: (<svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.28 3zm5.72 9.9L7.28 21H16.72l-4.72-8.1zm5.72-9.9L12 12.9 17.72 3H12z"/></svg>)
               },
               {
                 step: '02',
                 title: 'AI ingests & learns',
                 desc: 'Schedio vectorizes your data with OpenAI embeddings stored in pgvector. It learns patterns — who prefers mornings, who closes well.',
-                icon: (
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                )
+                icon: (<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>)
               },
               {
                 step: '03',
                 title: 'Generate, drag & print',
                 desc: 'Get a complete weekly schedule in seconds. Drag shifts to adjust. Chat with AI to tweak. Export to PDF and pin it up.',
-                icon: (
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                )
+                icon: (<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>)
               },
             ].map((item, i) => (
               <div key={i} className="card-hover relative border border-white/8 rounded-2xl p-8 bg-white/2 overflow-hidden">
@@ -455,8 +455,8 @@ export default function Home() {
               { title: 'Drag & Drop Calendar', desc: 'Interactive weekly view. Grab shifts and move them. Changes save instantly.', tag: 'NEW' },
               { title: 'AI Chat Assistant', desc: 'Say "move Sarah to Friday" or "add a closer Saturday" — the AI adjusts.', tag: 'AI' },
               { title: 'Google Drive RAG', desc: 'Upload photos of handwritten sheets. Schedio reads and vectorizes everything.', tag: null },
-              { title: 'PDF Export & Print', desc: 'One click to a print-ready schedule. Restaurant managers pin it on the wall.', tag: null },
-              { title: 'Pattern Learning', desc: 'The more you use it, the smarter it gets. Historical schedules train the AI.', tag: 'AI' },
+              { title: 'Multi-Location Support', desc: 'Manage multiple locations from one account. Each location gets its own isolated schedule history and RAG data.', tag: 'NEW' },
+              { title: 'Pattern Learning', desc: 'The more you use it, the smarter it gets. Historical schedules train the AI per location.', tag: 'AI' },
               { title: 'Multi-tenant SaaS', desc: 'Row-level security means your data is completely isolated from other businesses.', tag: null },
             ].map((f, i) => (
               <div key={i} className="card-hover border border-white/8 rounded-2xl p-6 bg-white/2 group">
@@ -481,14 +481,22 @@ export default function Home() {
             <h2 className="display text-5xl font-black tracking-tight">Simple pricing.<br /><span className="text-white/25">No surprises.</span></h2>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6 max-w-3xl">
+          <div className="grid md:grid-cols-3 gap-6 max-w-5xl">
+
             {/* Free */}
             <div className="card-hover border border-white/10 rounded-2xl p-8 bg-white/2">
               <div className="mono text-xs text-white/30 uppercase tracking-widest mb-6">Free Plan</div>
               <div className="display text-6xl font-black mb-1">$0</div>
               <p className="text-white/30 text-sm mono mb-8">forever</p>
               <div className="space-y-3 mb-10">
-                {['3 schedules / month', 'Google Drive integration', 'AI schedule generation', 'Drag & drop editor', 'PDF export'].map(f => (
+                {[
+                  'Up to 5 employees',
+                  '1 location',
+                  'Google Drive integration',
+                  'AI schedule generation',
+                  'Drag & drop editor',
+                  'Print & export',
+                ].map(f => (
                   <div key={f} className="flex items-center gap-3 text-sm text-white/50">
                     <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
                     {f}
@@ -503,12 +511,20 @@ export default function Home() {
             {/* Pro */}
             <div className="card-hover relative border border-emerald-400/40 rounded-2xl p-8 bg-emerald-400/4 overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-emerald-400/50 to-transparent" />
-              <div className="mono text-xs text-emerald-400 uppercase tracking-widest mb-6">Pro Plan</div>
+              <div className="plan-popular">MOST POPULAR</div>
+              <div className="mono text-xs text-emerald-400 uppercase tracking-widest mb-6 mt-2">Pro Plan</div>
               <div className="display text-6xl font-black mb-1">$29</div>
               <p className="text-white/30 text-sm mono mb-8">per month</p>
               <div className="space-y-3 mb-10">
-                {['Unlimited schedules', 'Everything in Free', 'AI chat assistant', 'Pattern learning', 'Schedule history', 'Priority support'].map(f => (
-                  <div key={f} className="flex items-center gap-3 text-sm text-white/60">
+                {[
+                  'Unlimited employees',
+                  '1 location',
+                  'Everything in Free',
+                  'AI chat assistant',
+                  'Schedule history & RAG',
+                  'Priority support',
+                ].map(f => (
+                  <div key={f} className="flex items-center gap-3 text-sm text-white/70">
                     <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
                     {f}
                   </div>
@@ -518,7 +534,39 @@ export default function Home() {
                 Start free trial →
               </Link>
             </div>
+
+            {/* Business */}
+            <div className="card-hover relative border border-white/10 rounded-2xl p-8 bg-white/2 overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+              <div className="mono text-xs text-white/30 uppercase tracking-widest mb-6">Business Plan</div>
+              <div className="display text-6xl font-black mb-1">$79</div>
+              <p className="text-white/30 text-sm mono mb-8">per month</p>
+              <div className="space-y-3 mb-10">
+                {[
+                  'Unlimited employees',
+                  'Unlimited locations',
+                  'Everything in Pro',
+                  'Per-location RAG history',
+                  'Isolated data per location',
+                  'Dedicated support',
+                ].map(f => (
+                  <div key={f} className="flex items-center gap-3 text-sm text-white/50">
+                    <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                    {f}
+                  </div>
+                ))}
+              </div>
+              <Link href="/register" className="block text-center border border-white/15 rounded-xl py-3.5 text-sm font-bold hover:border-white/30 transition-colors">
+                Get started →
+              </Link>
+            </div>
+
           </div>
+
+          {/* Plan comparison note */}
+          <p className="mono text-white/20 text-xs mt-8 max-w-5xl">
+            * Multi-location plans keep each location's schedule history and AI data fully isolated — no cross-location data bleed.
+          </p>
         </section>
 
         {/* CTA */}
