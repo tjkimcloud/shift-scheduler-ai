@@ -80,7 +80,8 @@ export default function Dashboard() {
     const [driveConnected, setDriveConnected] = useState(false)
     const [finalizing, setFinalizing] = useState(false)
     const [showUpgradePrompt, setShowUpgradePrompt] = useState(false)
-    const [lockedEmployees, setLockedEmployees] = useState<string[]>([])
+    const [showLimitModal, setShowLimitModal] = useState(false)
+    const [totalEmployees, setTotalEmployees] = useState(0)
 
     // Location state
     const [locations, setLocations] = useState<Location[]>([])
@@ -186,12 +187,16 @@ export default function Dashboard() {
         setRawSchedule('')
         setChatMessages([])
         setShowChat(false)
+        setShowUpgradePrompt(false)
+        setShowLimitModal(false)
     }, [activeLocationId])
 
     const generateSchedule = async () => {
         setLoading(true)
         setShifts([])
         setRawSchedule('')
+        setShowUpgradePrompt(false)
+        setShowLimitModal(false)
         const endpoint = activeLocationId
             ? `/generate-schedule?location_id=${activeLocationId}`
             : '/generate-schedule'
@@ -213,15 +218,17 @@ export default function Dashboard() {
                     color: employeeColors[s.employee]
                 }
             })
-            const uniqueEmps: string[] = Array.from(new Set<string>(parsedShifts.map((s: any) => s.employee as string)))
-            const limit = user?.max_employees || 5
-            if (!user?.is_pro && uniqueEmps.length > limit) {
+
+            // Handle employee limit
+            if (data.employee_limit_hit) {
+                setShowLimitModal(true)
+                setTotalEmployees(data.total_employees)
                 setShowUpgradePrompt(true)
-                setLockedEmployees(uniqueEmps.slice(limit))
             } else {
+                setShowLimitModal(false)
                 setShowUpgradePrompt(false)
-                setLockedEmployees([])
             }
+
             setShifts(parsedShifts)
             setRawSchedule(data.schedule)
             setActiveTab('calendar')
@@ -339,6 +346,8 @@ export default function Dashboard() {
     * { font-family: 'Outfit', sans-serif; }
     .mono { font-family: 'DM Mono', monospace; }
     .display { font-family: 'Syne', sans-serif; }
+    .btn-primary { position: relative; overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(52,211,153,0.35); }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     .fade-up { animation: fadeUp 0.3s ease forwards; }
     @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.3); } 50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } }
@@ -361,7 +370,7 @@ export default function Dashboard() {
                         <div className="w-8 h-8 bg-emerald-400 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-400/20">
                             <span className="text-black font-black text-sm" style={{ fontFamily: 'Syne, sans-serif' }}>S</span>
                         </div>
-                        <span className="font-bold tracking-tight text-lg display">Schedio</span>
+                        <span className="font-extrabold tracking-tight text-base display">Schedio</span>
                     </Link>
                     <div className="flex items-center gap-3">
                         {user && <span className="text-sm text-white/30 mono">{user.email}</span>}
@@ -627,104 +636,114 @@ export default function Dashboard() {
                     ) : (
                         <div className="flex gap-6">
                             <div className="flex-1 print-area">
+                                {/* Tab switcher */}
                                 <div className="no-print flex gap-1 mb-4 bg-white/5 rounded-xl p-1 w-fit">
                                     <button onClick={() => setActiveTab('calendar')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'calendar' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}>
                                         Calendar
                                     </button>
-                                    <button onClick={() => setActiveTab('raw')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'raw' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}>
-                                        Raw text
+                                    <button
+                                        onClick={() => !showUpgradePrompt && setActiveTab('raw')}
+                                        className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'raw' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'} ${showUpgradePrompt ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                    >
+                                        Raw text {showUpgradePrompt && '🔒'}
                                     </button>
                                 </div>
 
-                                {showUpgradePrompt && (
-                                    <div className="mb-4 border border-emerald-400/30 rounded-2xl px-6 py-4 bg-emerald-400/5 flex items-center justify-between">
-                                        <div>
-                                            <p className="text-sm font-semibold text-white">Your schedule has {[...new Set(shifts.map(s => s.employee))].length} employees</p>
-                                            <p className="text-xs text-white/40 mt-0.5">Free plan is limited to {user?.max_employees || 5} employees. {lockedEmployees.length} shifts are hidden.</p>
+                                {/* Calendar or raw text with blur overlay */}
+                                <div className="relative">
+                                    {/* Blur overlay shown after modal is dismissed */}
+                                    {!showLimitModal && showUpgradePrompt && (
+                                        <div className="absolute inset-0 z-20 backdrop-blur-md bg-black/60 rounded-2xl flex flex-col items-center justify-center gap-4">
+                                            <div className="w-12 h-12 rounded-2xl bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center">
+                                                <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                            </div>
+                                            <div className="text-center">
+                                                <p className="text-white font-semibold mb-1">Schedule locked</p>
+                                                <p className="text-white/50 text-sm">Your team has {totalEmployees} employees — upgrade to view</p>
+                                            </div>
+                                            <Link href="/upgrade" className="bg-emerald-400 text-black font-bold px-6 py-2.5 rounded-xl text-sm hover:bg-emerald-300 transition-colors">
+                                                Upgrade to Pro →
+                                            </Link>
                                         </div>
-                                        <Link href="/upgrade" className="btn-primary bg-emerald-400 text-black font-bold px-5 py-2 rounded-xl text-sm whitespace-nowrap">
-                                            Upgrade to Pro →
-                                        </Link>
-                                    </div>
-                                )}
+                                    )}
 
-                                {activeTab === 'calendar' ? (
-                                    <div className="border border-white/8 rounded-2xl overflow-hidden bg-[#0d0d0d]">
-                                        <div className="grid border-b border-white/8" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
-                                            <div className="border-r border-white/5" />
-                                            {DAYS.map(day => (
-                                                <div key={day} className="py-3 px-2 text-center border-r border-white/5 last:border-0">
-                                                    <span className="text-xs font-semibold text-white/50 uppercase tracking-wider">
-                                                        {WEEK_DAYS.find(w => w.full === day)?.display || day.slice(0, 3)}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-
-                                        <div className="relative" style={{ height: `${HOUR_HEIGHT * 17}px` }}>
-                                            <div className="grid h-full" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
-                                                <div className="border-r border-white/5">
-                                                    {HOURS.map(hour => (
-                                                        <div key={hour} style={{ height: HOUR_HEIGHT }} className="border-b border-white/5 flex items-start justify-end pr-3 pt-1.5">
-                                                            <span className="text-xs text-white/20 mono">
-                                                                {hour === 12 ? '12pm' : hour > 12 ? `${hour - 12}pm` : `${hour}am`}
-                                                            </span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-
+                                    {activeTab === 'calendar' ? (
+                                        <div className="border border-white/8 rounded-2xl overflow-hidden bg-[#0d0d0d]">
+                                            <div className="grid border-b border-white/8" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
+                                                <div className="border-r border-white/5" />
                                                 {DAYS.map(day => (
-                                                    <div key={day} className="border-r border-white/5 last:border-0 relative">
+                                                    <div key={day} className="py-3 px-2 text-center border-r border-white/5 last:border-0">
+                                                        <span className="text-xs font-semibold text-white/50 uppercase tracking-wider">
+                                                            {WEEK_DAYS.find(w => w.full === day)?.display || day.slice(0, 3)}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            <div className="relative" style={{ height: `${HOUR_HEIGHT * 17}px` }}>
+                                                <div className="grid h-full" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
+                                                    <div className="border-r border-white/5">
                                                         {HOURS.map(hour => (
-                                                            <div
-                                                                key={hour}
-                                                                className="drop-zone border-b border-white/5"
-                                                                style={{ height: HOUR_HEIGHT }}
-                                                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                                                                onDrop={() => handleDrop(day, hour)}
-                                                            />
+                                                            <div key={hour} style={{ height: HOUR_HEIGHT }} className="border-b border-white/5 flex items-start justify-end pr-3 pt-1.5">
+                                                                <span className="text-xs text-white/20 mono">
+                                                                    {hour === 12 ? '12pm' : hour > 12 ? `${hour - 12}pm` : `${hour}am`}
+                                                                </span>
+                                                            </div>
                                                         ))}
-                                                        {shifts.filter(s => s.day === day).map(shift => {
-                                                            const isLocked = lockedEmployees.includes(shift.employee)
-                                                            return (
+                                                    </div>
+
+                                                    {DAYS.map(day => (
+                                                        <div key={day} className="border-r border-white/5 last:border-0 relative">
+                                                            {HOURS.map(hour => (
+                                                                <div
+                                                                    key={hour}
+                                                                    className="drop-zone border-b border-white/5"
+                                                                    style={{ height: HOUR_HEIGHT }}
+                                                                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                                                    onDrop={() => handleDrop(day, hour)}
+                                                                />
+                                                            ))}
+                                                            {shifts.filter(s => s.day === day).map(shift => (
                                                                 <div
                                                                     key={shift.id}
-                                                                    draggable={!isLocked}
-                                                                    onDragStart={() => !isLocked && handleDragStart(shift.id)}
-                                                                    className={`shift-block absolute left-1 right-1 rounded-lg border ${shift.color} px-2 py-1 overflow-hidden ${isLocked ? 'opacity-30 blur-sm cursor-not-allowed' : ''}`}
+                                                                    draggable
+                                                                    onDragStart={() => handleDragStart(shift.id)}
+                                                                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                                                    onDrop={(e) => { e.stopPropagation(); handleDrop(day, shift.startHour); }}
+                                                                    className={`shift-block absolute left-1 right-1 rounded-lg border ${shift.color} px-2 py-1 overflow-hidden`}
                                                                     style={{
                                                                         top: `${(shift.startHour - 6) * HOUR_HEIGHT + 2}px`,
                                                                         height: `${(shift.endHour - shift.startHour) * HOUR_HEIGHT - 4}px`,
                                                                     }}
                                                                 >
-                                                                    <p className="text-xs font-semibold text-white leading-tight truncate">{isLocked ? '••••••' : shift.employee}</p>
+                                                                    <p className="text-xs font-semibold text-white leading-tight truncate">{shift.employee}</p>
                                                                     <p className="text-xs text-white/60 mono">
-                                                                        {isLocked ? '•• – ••' : `${shift.startHour > 12 ? shift.startHour - 12 : shift.startHour}${shift.startHour >= 12 ? 'pm' : 'am'} – ${shift.endHour > 12 ? shift.endHour - 12 : shift.endHour}${shift.endHour >= 12 ? 'pm' : 'am'}`}
+                                                                        {shift.startHour > 12 ? shift.startHour - 12 : shift.startHour}{shift.startHour >= 12 ? 'pm' : 'am'} – {shift.endHour > 12 ? shift.endHour - 12 : shift.endHour}{shift.endHour >= 12 ? 'pm' : 'am'}
                                                                     </p>
                                                                 </div>
-                                                            )
-                                                        })}
-                                                    </div>
-                                                ))}
+                                                            ))}
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </div>
 
-                                        {employees.length > 0 && (
-                                            <div className="border-t border-white/8 px-4 py-3 flex flex-wrap gap-3">
-                                                {employees.map(emp => (
-                                                    <div key={emp} className="flex items-center gap-1.5">
-                                                        <div className={`w-2.5 h-2.5 rounded-full ${employeeColorMap[emp]?.split(' ')[0]}`} />
-                                                        <span className="text-xs text-white/50">{emp}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <div className="border border-white/8 rounded-2xl p-6 bg-[#0d0d0d]">
-                                        <pre className="text-sm text-white/60 whitespace-pre-wrap leading-relaxed mono">{rawSchedule}</pre>
-                                    </div>
-                                )}
+                                            {employees.length > 0 && (
+                                                <div className="border-t border-white/8 px-4 py-3 flex flex-wrap gap-3">
+                                                    {employees.map(emp => (
+                                                        <div key={emp} className="flex items-center gap-1.5">
+                                                            <div className={`w-2.5 h-2.5 rounded-full ${employeeColorMap[emp]?.split(' ')[0]}`} />
+                                                            <span className="text-xs text-white/50">{emp}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="border border-white/8 rounded-2xl p-6 bg-[#0d0d0d]">
+                                            <pre className="text-sm text-white/60 whitespace-pre-wrap leading-relaxed mono">{rawSchedule}</pre>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {showChat && (
@@ -785,6 +804,36 @@ export default function Dashboard() {
                         </div>
                     )}
                 </div>
+
+                {/* Employee limit modal */}
+                {showLimitModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                        <div className="bg-[#111] border border-white/10 rounded-2xl p-8 max-w-md w-full mx-4 relative">
+                            <button
+                                onClick={() => setShowLimitModal(false)}
+                                className="absolute top-4 right-4 text-white/30 hover:text-white/60 text-xl leading-none"
+                            >✕</button>
+                            <div className="w-12 h-12 rounded-2xl bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center mb-6">
+                                <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            </div>
+                            <h2 className="text-xl font-bold mb-2">Your team has {totalEmployees} employees</h2>
+                            <p className="text-white/40 text-sm mb-8 leading-relaxed">
+                                Your schedule was generated for all {totalEmployees} employees. Upgrade to Pro to view and manage your full schedule with unlimited employees.
+                            </p>
+                            <div className="flex flex-col gap-3">
+                                <Link href="/upgrade" className="btn-primary block text-center bg-emerald-400 text-black font-bold rounded-xl py-3.5 text-sm">
+                                    Upgrade to Pro →
+                                </Link>
+                                <button
+                                    onClick={() => setShowLimitModal(false)}
+                                    className="text-white/30 text-sm hover:text-white/50 transition-colors"
+                                >
+                                    Maybe later
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </main>
         </>
     )
