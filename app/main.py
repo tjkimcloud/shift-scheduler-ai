@@ -34,7 +34,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FREE_TIER_LIMIT = 3
+FREE_TIER_EMPLOYEE_LIMIT = 5
+FREE_TIER_LOCATION_LIMIT = 1
+PRO_TIER_LOCATION_LIMIT = 1
 
 @app.get("/")
 def root():
@@ -50,7 +52,12 @@ def register(request: AuthRequest, db: Session = Depends(get_db)):
     try:
         response = supabase.auth.sign_up({"email": request.email, "password": request.password})
         user_id = response.user.id
-        db_user = models.User(id=user_id, email=request.email)
+        db_user = models.User(
+            id=user_id,
+            email=request.email,
+            max_employees=FREE_TIER_EMPLOYEE_LIMIT,
+            max_locations=FREE_TIER_LOCATION_LIMIT
+        )
         db.add(db_user)
         db.commit()
         return {"message": "User created successfully", "user_id": user_id}
@@ -107,21 +114,20 @@ def get_files(db: Session = Depends(get_db), current_user=Depends(get_current_us
     service = get_drive_service(creds)
     files = list_files(service)
     
-    # Filter to scheduling-relevant file types only
     allowed_types = [
-        'application/vnd.google-apps.spreadsheet',      # Google Sheets
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # Excel
-        'text/csv',                                      # CSV
-        'application/vnd.google-apps.document',         # Google Docs
-        'application/pdf',                               # PDF
-        'image/jpeg',                                    # Photo of schedule
-        'image/png',                                     # Photo of schedule
+        'application/vnd.google-apps.spreadsheet',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/csv',
+        'application/vnd.google-apps.document',
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
     ]
     filtered = [f for f in files if f.get('mimeType') in allowed_types]
     return {"files": filtered}
 
 @app.post("/drive/ingest/{file_id}")
-def ingest_drive_file(file_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def ingest_drive_file(file_id: str, location_id: str = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     import json
     db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
     if not db_user or not db_user.google_credentials:
@@ -140,14 +146,67 @@ def ingest_drive_file(file_id: str, db: Session = Depends(get_db), current_user=
             user_id=current_user.id,
             content=chunk,
             embedding=embedding,
-            source=file_info['name']
+            source=file_info['name'],
+            location_id=location_id
         )
         db.add(db_chunk)
     db.commit()
     return {"message": f"Ingested {len(chunks)} chunks from {file_info['name']}"}
 
+# --- Location endpoints ---
+
+class LocationRequest(BaseModel):
+    name: str
+
+@app.get("/locations")
+def get_locations(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    locations = db.query(models.Location).filter(
+        models.Location.user_id == current_user.id
+    ).all()
+    return {"locations": [{"id": str(loc.id), "name": loc.name, "created_at": str(loc.created_at)} for loc in locations]}
+
+@app.post("/locations")
+def create_location(request: LocationRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
+
+    existing_locations = db.query(models.Location).filter(
+        models.Location.user_id == current_user.id
+    ).count()
+
+    max_locations = db_user.max_locations or FREE_TIER_LOCATION_LIMIT
+
+    if existing_locations >= max_locations:
+        plan = "Pro" if db_user.is_pro else "Free"
+        raise HTTPException(
+            status_code=403,
+            detail=f"Location limit reached. Your {plan} plan allows {max_locations} location(s). Upgrade to Business for multiple locations."
+        )
+
+    location = models.Location(
+        user_id=current_user.id,
+        name=request.name
+    )
+    db.add(location)
+    db.commit()
+    db.refresh(location)
+    return {"id": str(location.id), "name": location.name}
+
+@app.delete("/locations/{location_id}")
+def delete_location(location_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    location = db.query(models.Location).filter(
+        models.Location.id == location_id,
+        models.Location.user_id == current_user.id
+    ).first()
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+    db.delete(location)
+    db.commit()
+    return {"message": "Location deleted"}
+
+# --- Schedule endpoints ---
+
 @app.post("/generate-schedule")
-def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def generate_schedule(location_id: str = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     from datetime import datetime, timedelta
     from openai import OpenAI
     import json
@@ -156,36 +215,39 @@ def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_cu
     
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    if not db_user.is_pro and db_user.schedules_this_month >= FREE_TIER_LIMIT:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Free tier limit reached ({FREE_TIER_LIMIT} schedules/month). Upgrade to Pro for unlimited schedules."
-        )
-    
-    chunks = db.query(models.DocumentChunk).filter(
+
+    # Fetch availability chunks scoped by location if provided
+    chunks_query = db.query(models.DocumentChunk).filter(
         models.DocumentChunk.user_id == current_user.id
-    ).limit(10).all()
+    )
+    if location_id:
+        chunks_query = chunks_query.filter(models.DocumentChunk.location_id == location_id)
+    chunks = chunks_query.limit(10).all()
     
     if not chunks:
         raise HTTPException(status_code=400, detail="No availability data found. Please ingest files first.")
     
-    availability = "\\n\\n".join([chunk.content for chunk in chunks])
-    
+    availability = "\n\n".join([chunk.content for chunk in chunks])
+
+    # Enforce free tier employee limit
+    max_employees = db_user.max_employees or FREE_TIER_EMPLOYEE_LIMIT
+    employee_limit_instruction = ""
+    if not db_user.is_pro:
+        employee_limit_instruction = f"\n\nIMPORTANT: This is a free tier account. Only schedule a maximum of {max_employees} employees. If more employees are in the availability data, pick the first {max_employees} and ignore the rest."
+
     # Generate week dates starting from Monday
     today = datetime.now()
     day_of_week = today.weekday()
     monday = today - timedelta(days=day_of_week)
     week_dates = [(monday + timedelta(days=i)).strftime('%A, %m/%d/%Y') for i in range(7)]
-    week_str = "\\n".join(week_dates)
+    week_str = "\n".join(week_dates)
     
-    # Generate human-readable schedule
     schedule = generate_completion(
-        prompt=f"Here is the employee availability:\\n\\n{availability}\\n\\nPlease create a weekly schedule for the following week:\\n{week_str}\\n\\nLabel each day with its full date (e.g. 'Monday, 03/02/2026'). Business hours are 9am to 10pm.",
+        prompt=f"Here is the employee availability:\n\n{availability}\n\nPlease create a weekly schedule for the following week:\n{week_str}\n\nLabel each day with its full date (e.g. 'Monday, 03/02/2026'). Business hours are 9am to 10pm.{employee_limit_instruction}",
         system="You are a scheduling assistant for small businesses. Create a fair weekly schedule based on employee availability. Always include the full date with each day."
     )
     
-# Convert to structured JSON for the calendar
+    # Convert to structured JSON for the calendar
     client = OpenAI()
     json_response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -200,15 +262,26 @@ def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_cu
     except:
         schedule_json = {"shifts": []}
 
+    # Enforce employee limit on returned shifts as a safety net
+    if not db_user.is_pro:
+        unique_employees = []
+        filtered_shifts = []
+        for shift in schedule_json.get("shifts", []):
+            if shift["employee"] not in unique_employees:
+                if len(unique_employees) < max_employees:
+                    unique_employees.append(shift["employee"])
+            if shift["employee"] in unique_employees:
+                filtered_shifts.append(shift)
+        schedule_json["shifts"] = filtered_shifts
+
     # Save schedule to DB
     db_schedule = models.Schedule(
         user_id=current_user.id,
         availability_text=availability,
-        generated_schedule=schedule
+        generated_schedule=schedule,
+        location_id=location_id
     )
     db.add(db_schedule)
-
-    # Increment usage counter
     db_user.schedules_this_month += 1
     db.commit()
 
@@ -216,6 +289,7 @@ def generate_schedule(db: Session = Depends(get_db), current_user=Depends(get_cu
 
 class FinalizeRequest(BaseModel):
     schedule: str
+    location_id: str = None
 
 @app.post("/finalize-schedule")
 def finalize_schedule(request: FinalizeRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
@@ -225,13 +299,13 @@ def finalize_schedule(request: FinalizeRequest, db: Session = Depends(get_db), c
     monday = today - timedelta(days=today.weekday())
     week_dates = [(monday + timedelta(days=i)).strftime('%A, %m/%d/%Y') for i in range(7)]
 
-    # Save finalized schedule as RAG chunk
     schedule_embeddings = get_embeddings([request.schedule])
     schedule_chunk = models.DocumentChunk(
         user_id=current_user.id,
-        content=f"Finalized schedule for week of {week_dates[0]} through {week_dates[6]}:\\n{request.schedule}",
+        content=f"Finalized schedule for week of {week_dates[0]} through {week_dates[6]}:\n{request.schedule}",
         embedding=schedule_embeddings[0],
-        source=f"Finalized Schedule - {week_dates[0]}"
+        source=f"Finalized Schedule - {week_dates[0]}",
+        location_id=request.location_id
     )
     db.add(schedule_chunk)
     db.commit()
@@ -241,29 +315,44 @@ def finalize_schedule(request: FinalizeRequest, db: Session = Depends(get_db), c
 class ChatRequest(BaseModel):
     message: str
     schedule: str
+    location_id: str = None
 
 @app.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     from openai import OpenAI
     from datetime import datetime
+    from sqlalchemy import text
     import json
     client = OpenAI()
     
     question_embedding = get_embeddings([request.message])[0]
-    
-    from sqlalchemy import text
-    
-    relevant_chunks = db.execute(
-        text("""
-        SELECT content, source, 
-               1 - (embedding <=> :embedding) as similarity
-        FROM document_chunks 
-        WHERE user_id = :user_id
-        ORDER BY embedding <=> :embedding
-        LIMIT 5
-        """),
-        {"embedding": str(question_embedding), "user_id": current_user.id}
-    ).fetchall()
+
+    # Scope RAG search to location if provided
+    if request.location_id:
+        relevant_chunks = db.execute(
+            text("""
+            SELECT content, source, 
+                   1 - (embedding <=> :embedding) as similarity
+            FROM document_chunks 
+            WHERE user_id = :user_id
+              AND location_id = :location_id
+            ORDER BY embedding <=> :embedding
+            LIMIT 5
+            """),
+            {"embedding": str(question_embedding), "user_id": current_user.id, "location_id": request.location_id}
+        ).fetchall()
+    else:
+        relevant_chunks = db.execute(
+            text("""
+            SELECT content, source, 
+                   1 - (embedding <=> :embedding) as similarity
+            FROM document_chunks 
+            WHERE user_id = :user_id
+            ORDER BY embedding <=> :embedding
+            LIMIT 5
+            """),
+            {"embedding": str(question_embedding), "user_id": current_user.id}
+        ).fetchall()
     
     historical_context = "\n\n".join([
         f"[Source: {chunk.source}]\n{chunk.content}" 
@@ -288,7 +377,6 @@ def chat(request: ChatRequest, db: Session = Depends(get_db), current_user=Depen
         confirm = parts[0].replace("CONFIRM:", "").strip()
         schedule_text = parts[1].strip()
         
-        # Convert updated schedule to JSON
         json_response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -317,7 +405,9 @@ def get_me(db: Session = Depends(get_db), current_user=Depends(get_current_user)
         "email": db_user.email,
         "is_pro": db_user.is_pro,
         "schedules_this_month": db_user.schedules_this_month,
-        "schedules_remaining": "unlimited" if db_user.is_pro else max(0, FREE_TIER_LIMIT - db_user.schedules_this_month)
+        "schedules_remaining": "unlimited" if db_user.is_pro else "unlimited",
+        "max_employees": db_user.max_employees or FREE_TIER_EMPLOYEE_LIMIT,
+        "max_locations": db_user.max_locations or FREE_TIER_LOCATION_LIMIT
     }
 
 @app.post("/billing/checkout")
@@ -355,11 +445,20 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         session = event["data"]["object"]
         user_id = session["metadata"]["user_id"]
         customer_id = session["customer"]
+        price_id = session.get("metadata", {}).get("price_id", "")
         
         db_user = db.query(models.User).filter(models.User.id == user_id).first()
         if db_user:
             db_user.is_pro = True
             db_user.stripe_customer_id = customer_id
+            # Business plan gets unlimited locations
+            if "business" in price_id.lower():
+                db_user.max_employees = 9999
+                db_user.max_locations = 9999
+            else:
+                # Pro plan: unlimited employees, still 1 location
+                db_user.max_employees = 9999
+                db_user.max_locations = PRO_TIER_LOCATION_LIMIT
             db.commit()
     
     elif event["type"] == "customer.subscription.deleted":
@@ -369,6 +468,8 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         ).first()
         if db_user:
             db_user.is_pro = False
+            db_user.max_employees = FREE_TIER_EMPLOYEE_LIMIT
+            db_user.max_locations = FREE_TIER_LOCATION_LIMIT
             db.commit()
     
     return JSONResponse(content={"status": "success"})

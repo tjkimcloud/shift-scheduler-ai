@@ -8,6 +8,13 @@ interface UserData {
     is_pro: boolean
     schedules_this_month: number
     schedules_remaining: number | string
+    max_employees: number
+    max_locations: number
+}
+
+interface Location {
+    id: string
+    name: string
 }
 
 interface Shift {
@@ -55,60 +62,6 @@ const COLORS = [
 
 const HOUR_HEIGHT = 56
 
-function parseScheduleToShifts(scheduleText: string): Shift[] {
-    const shifts: Shift[] = []
-    const employeeColors: Record<string, string> = {}
-    let colorIndex = 0
-
-    const lines = scheduleText.split('\n')
-    let currentDay = ''
-
-    for (const line of lines) {
-        const dayMatch = DAYS.find(d => line.toLowerCase().includes(d.toLowerCase()))
-        if (dayMatch) {
-            currentDay = dayMatch
-            continue
-        }
-
-        if (!currentDay) continue
-
-        const timeMatches = [...line.matchAll(/(\d{1,2})(am|pm)/gi)]
-        if (timeMatches.length < 2) continue
-
-        const nameMatch = line.match(/:\s*([A-Za-z\s]+?)(?:\s*\(|$)/)?.[1]?.trim()
-        if (!nameMatch || nameMatch.length < 2) continue
-
-        const parseHour = (match: RegExpMatchArray) => {
-            let h = parseInt(match[1])
-            const period = match[2].toLowerCase()
-            if (period === 'pm' && h !== 12) h += 12
-            if (period === 'am' && h === 12) h = 0
-            return h
-        }
-
-        const startHour = parseHour(timeMatches[0])
-        const endHour = parseHour(timeMatches[1])
-
-        if (!employeeColors[nameMatch]) {
-            employeeColors[nameMatch] = COLORS[colorIndex % COLORS.length]
-            colorIndex++
-        }
-
-        if (startHour >= 6 && endHour <= 24 && startHour < endHour) {
-            shifts.push({
-                id: `${nameMatch}-${currentDay}-${startHour}`,
-                employee: nameMatch,
-                day: currentDay,
-                startHour,
-                endHour,
-                color: employeeColors[nameMatch],
-            })
-        }
-    }
-
-    return shifts
-}
-
 export default function Dashboard() {
     const [user, setUser] = useState<UserData | null>(null)
     const [rawSchedule, setRawSchedule] = useState('')
@@ -125,6 +78,14 @@ export default function Dashboard() {
     const [files, setFiles] = useState<{ id: string, name: string, mimeType: string }[]>([])
     const [ingesting, setIngesting] = useState<string | null>(null)
     const [driveConnected, setDriveConnected] = useState(false)
+
+    // Location state
+    const [locations, setLocations] = useState<Location[]>([])
+    const [activeLocationId, setActiveLocationId] = useState<string | null>(null)
+    const [showNewLocation, setShowNewLocation] = useState(false)
+    const [newLocationName, setNewLocationName] = useState('')
+    const [creatingLocation, setCreatingLocation] = useState(false)
+
     const chatEndRef = useRef<HTMLDivElement>(null)
     const router = useRouter()
 
@@ -143,11 +104,34 @@ export default function Dashboard() {
         return res.json()
     }
 
+    const loadLocations = async () => {
+        const data = await apiCall('/locations')
+        if (data?.locations) {
+            setLocations(data.locations)
+            if (!activeLocationId && data.locations.length > 0) {
+                setActiveLocationId(data.locations[0].id)
+            }
+        }
+    }
+
+    const createLocation = async () => {
+        if (!newLocationName.trim()) return
+        setCreatingLocation(true)
+        const data = await apiCall('/locations', 'POST', { name: newLocationName.trim() })
+        if (data?.id) {
+            setLocations(prev => [...prev, { id: data.id, name: data.name }])
+            setActiveLocationId(data.id)
+            setNewLocationName('')
+            setShowNewLocation(false)
+            setMessage(`✅ Location "${data.name}" created!`)
+        }
+        if (data?.detail) setMessage(`❌ ${data.detail}`)
+        setCreatingLocation(false)
+    }
+
     const connectDrive = async () => {
         const data = await apiCall('/drive/auth')
-        if (data?.auth_url) {
-            window.location.href = data.auth_url
-        }
+        if (data?.auth_url) window.location.href = data.auth_url
     }
 
     const loadFiles = async () => {
@@ -164,7 +148,10 @@ export default function Dashboard() {
 
     const ingestFile = async (fileId: string) => {
         setIngesting(fileId)
-        const data = await apiCall(`/drive/ingest/${fileId}`, 'POST')
+        const endpoint = activeLocationId
+            ? `/drive/ingest/${fileId}?location_id=${activeLocationId}`
+            : `/drive/ingest/${fileId}`
+        const data = await apiCall(endpoint, 'POST')
         if (data?.message) setMessage(data.message)
         if (data?.error) setMessage(data.error)
         setIngesting(null)
@@ -173,6 +160,7 @@ export default function Dashboard() {
     useEffect(() => {
         if (!token) { router.push('/login'); return }
         apiCall('/me').then(data => { if (data) setUser(data) })
+        loadLocations()
     }, [])
 
     useEffect(() => {
@@ -189,11 +177,22 @@ export default function Dashboard() {
         }
     }, [])
 
+    // Clear schedule when switching locations
+    useEffect(() => {
+        setShifts([])
+        setRawSchedule('')
+        setChatMessages([])
+        setShowChat(false)
+    }, [activeLocationId])
+
     const generateSchedule = async () => {
         setLoading(true)
         setShifts([])
         setRawSchedule('')
-        const data = await apiCall('/generate-schedule', 'POST')
+        const endpoint = activeLocationId
+            ? `/generate-schedule?location_id=${activeLocationId}`
+            : '/generate-schedule'
+        const data = await apiCall(endpoint, 'POST')
         if (data?.shifts && data.shifts.length > 0) {
             const employeeColors: Record<string, string> = {}
             let colorIndex = 0
@@ -233,7 +232,10 @@ export default function Dashboard() {
             setMessage('⚠️ No schedule to finalize. Generate a schedule first.')
             return
         }
-        const data = await apiCall('/finalize-schedule', 'POST', { schedule: rawSchedule })
+        const data = await apiCall('/finalize-schedule', 'POST', {
+            schedule: rawSchedule,
+            location_id: activeLocationId
+        })
         if (data?.message) setMessage('✅ Schedule finalized and saved!')
         if (data?.detail) setMessage(`❌ ${data.detail}`)
     }
@@ -248,7 +250,8 @@ export default function Dashboard() {
         try {
             const data = await apiCall('/chat', 'POST', {
                 message: userMsg,
-                schedule: rawSchedule
+                schedule: rawSchedule,
+                location_id: activeLocationId
             })
             const reply = data?.response || "I couldn't process that request."
             setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
@@ -291,9 +294,7 @@ export default function Dashboard() {
         setDragging(null)
     }
 
-    const handlePrint = () => {
-        window.print()
-    }
+    const handlePrint = () => window.print()
 
     const logout = () => {
         localStorage.clear()
@@ -306,6 +307,9 @@ export default function Dashboard() {
         const shift = shifts.find(s => s.employee === emp)
         if (shift) employeeColorMap[emp] = shift.color
     })
+
+    const activeLocation = locations.find(l => l.id === activeLocationId)
+    const canAddLocation = user ? locations.length < (user.max_locations || 1) : false
 
     return (
         <>
@@ -354,10 +358,76 @@ export default function Dashboard() {
                 </nav>
 
                 <div className="max-w-7xl mx-auto px-6 py-8">
+
+                    {/* Location selector */}
+                    <div className="no-print mb-6">
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <span className="text-xs text-white/30 uppercase tracking-wider font-medium">Location</span>
+                            {locations.map(loc => (
+                                <button
+                                    key={loc.id}
+                                    onClick={() => setActiveLocationId(loc.id)}
+                                    className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-all border ${
+                                        activeLocationId === loc.id
+                                            ? 'bg-emerald-400/10 border-emerald-400/40 text-emerald-400'
+                                            : 'border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
+                                    }`}
+                                >
+                                    {loc.name}
+                                </button>
+                            ))}
+
+                            {canAddLocation ? (
+                                showNewLocation ? (
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            autoFocus
+                                            value={newLocationName}
+                                            onChange={e => setNewLocationName(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && createLocation()}
+                                            placeholder="Location name..."
+                                            className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-emerald-400/50 w-44"
+                                        />
+                                        <button
+                                            onClick={createLocation}
+                                            disabled={creatingLocation || !newLocationName.trim()}
+                                            className="px-3 py-1.5 rounded-xl bg-emerald-400 text-black text-sm font-bold disabled:opacity-40"
+                                        >
+                                            {creatingLocation ? '...' : 'Add'}
+                                        </button>
+                                        <button
+                                            onClick={() => { setShowNewLocation(false); setNewLocationName('') }}
+                                            className="text-white/30 hover:text-white/60 text-lg leading-none"
+                                        >✕</button>
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowNewLocation(true)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-dashed border-white/15 text-white/30 text-sm hover:border-white/30 hover:text-white/50 transition-all"
+                                    >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                        Add location
+                                    </button>
+                                )
+                            ) : (
+                                <Link
+                                    href="/upgrade"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-dashed border-white/15 text-white/30 text-sm hover:border-emerald-400/30 hover:text-emerald-400/60 transition-all"
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                    Add location — upgrade required
+                                </Link>
+                            )}
+                        </div>
+                        {locations.length === 0 && !showNewLocation && (
+                            <p className="text-xs text-white/25 mt-2">Create a location to get started — all schedules and history will be scoped to it.</p>
+                        )}
+                    </div>
+
                     {/* Header row */}
                     <div className="no-print flex items-center justify-between mb-8">
                         <div>
-                            <h1 className="text-2xl font-bold">Schedule</h1>
+                            <h1 className="text-2xl font-bold">{activeLocation ? activeLocation.name : 'Schedule'}</h1>
                             <p className="text-white/40 text-sm mt-0.5">Weekly staff schedule — drag shifts to adjust</p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -388,7 +458,7 @@ export default function Dashboard() {
                             )}
                             <button
                                 onClick={generateSchedule}
-                                disabled={loading || (user !== null && !user.is_pro && user.schedules_this_month >= 3)}
+                                disabled={loading || !activeLocationId}
                                 className="flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-400 text-black font-bold text-sm hover:bg-emerald-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed glow-pulse"
                             >
                                 {loading ? (
@@ -406,19 +476,14 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* Usage bar */}
+                    {/* Free plan notice */}
                     {user && !user.is_pro && (
                         <div className="no-print bg-white/3 border border-white/8 rounded-2xl px-6 py-4 mb-6 flex items-center justify-between">
-                            <div className="flex items-center gap-4 flex-1">
+                            <div className="flex items-center gap-3">
                                 <span className="text-sm text-white/50">Free plan</span>
-                                <div className="flex-1 max-w-48 h-1 bg-white/10 rounded-full overflow-hidden">
-                                    <div className="h-full bg-emerald-400 rounded-full transition-all" style={{ width: `${(user.schedules_this_month / 3) * 100}%` }} />
-                                </div>
-                                <span className="text-sm text-white/40 mono">{user.schedules_this_month}/3</span>
+                                <span className="text-xs text-white/30 mono">Up to {user.max_employees} employees · 1 location</span>
                             </div>
-                            {user.schedules_this_month >= 3 && (
-                                <Link href="/upgrade" className="text-sm text-emerald-400 font-medium hover:text-emerald-300">Upgrade for unlimited →</Link>
-                            )}
+                            <Link href="/upgrade" className="text-sm text-emerald-400 font-medium hover:text-emerald-300">Upgrade for unlimited →</Link>
                         </div>
                     )}
 
@@ -450,7 +515,9 @@ export default function Dashboard() {
                                         )}
                                     </div>
                                     <p className="text-xs text-white/30">
-                                        {driveConnected ? 'Load your scheduling files below' : 'Connect Drive to import availability files and historical schedules'}
+                                        {activeLocation
+                                            ? `Files will be ingested into "${activeLocation.name}"`
+                                            : driveConnected ? 'Load your scheduling files below' : 'Connect Drive to import availability files and historical schedules'}
                                     </p>
                                 </div>
                             </div>
@@ -461,29 +528,24 @@ export default function Dashboard() {
                             <div className="px-6 pb-5 border-t border-white/5 pt-4 fade-up">
                                 <div className="flex gap-3 mb-4">
                                     {!driveConnected ? (
-                                        <button
-                                            onClick={connectDrive}
-                                            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all"
-                                        >
+                                        <button onClick={connectDrive} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all">
                                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.28 3zm5.72 9.9L7.28 21H16.72l-4.72-8.1zm5.72-9.9L12 12.9 17.72 3H12z" /></svg>
                                             Connect Google Drive
                                         </button>
                                     ) : (
-                                        <button
-                                            onClick={connectDrive}
-                                            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all text-white/40"
-                                        >
+                                        <button onClick={connectDrive} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all text-white/40">
                                             Reconnect
                                         </button>
                                     )}
-                                    <button
-                                        onClick={loadFiles}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 text-sm font-medium hover:bg-white/10 transition-all"
-                                    >
+                                    <button onClick={loadFiles} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 text-sm font-medium hover:bg-white/10 transition-all">
                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                                         Load files
                                     </button>
                                 </div>
+
+                                {!activeLocationId && (
+                                    <p className="text-xs text-amber-400/70 mb-3">⚠️ Select or create a location above before ingesting files.</p>
+                                )}
 
                                 {files.length > 0 && (
                                     <div className="space-y-1">
@@ -496,7 +558,7 @@ export default function Dashboard() {
                                                 </div>
                                                 <button
                                                     onClick={() => ingestFile(file.id)}
-                                                    disabled={ingesting === file.id}
+                                                    disabled={ingesting === file.id || !activeLocationId}
                                                     className="text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50 font-medium ml-4 shrink-0"
                                                 >
                                                     {ingesting === file.id ? 'Ingesting...' : 'Ingest →'}
@@ -520,7 +582,11 @@ export default function Dashboard() {
                                 <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                             </div>
                             <p className="text-white/30 text-sm mb-2">No schedule yet</p>
-                            <p className="text-white/20 text-xs">Connect Google Drive and ingest your availability files, then click Generate Schedule</p>
+                            <p className="text-white/20 text-xs">
+                                {!activeLocationId
+                                    ? 'Create a location first, then connect Google Drive and ingest your availability files'
+                                    : 'Connect Google Drive and ingest your availability files, then click Generate Schedule'}
+                            </p>
                         </div>
                     ) : loading ? (
                         <div className="flex flex-col items-center justify-center py-32 fade-up">
@@ -529,9 +595,7 @@ export default function Dashboard() {
                         </div>
                     ) : (
                         <div className="flex gap-6">
-                            {/* Calendar */}
                             <div className="flex-1 print-area">
-                                {/* Tab bar */}
                                 <div className="no-print flex gap-1 mb-4 bg-white/5 rounded-xl p-1 w-fit">
                                     <button onClick={() => setActiveTab('calendar')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'calendar' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}>
                                         Calendar
@@ -543,7 +607,6 @@ export default function Dashboard() {
 
                                 {activeTab === 'calendar' ? (
                                     <div className="border border-white/8 rounded-2xl overflow-hidden bg-[#0d0d0d]">
-                                        {/* Day headers */}
                                         <div className="grid border-b border-white/8" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
                                             <div className="border-r border-white/5" />
                                             {DAYS.map(day => (
@@ -555,10 +618,8 @@ export default function Dashboard() {
                                             ))}
                                         </div>
 
-                                        {/* Time grid */}
                                         <div className="relative" style={{ height: `${HOUR_HEIGHT * 17}px` }}>
                                             <div className="grid h-full" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
-                                                {/* Hour labels */}
                                                 <div className="border-r border-white/5">
                                                     {HOURS.map(hour => (
                                                         <div key={hour} style={{ height: HOUR_HEIGHT }} className="border-b border-white/5 flex items-start justify-end pr-3 pt-1.5">
@@ -569,7 +630,6 @@ export default function Dashboard() {
                                                     ))}
                                                 </div>
 
-                                                {/* Day columns */}
                                                 {DAYS.map(day => (
                                                     <div key={day} className="border-r border-white/5 last:border-0 relative">
                                                         {HOURS.map(hour => (
@@ -581,7 +641,6 @@ export default function Dashboard() {
                                                                 onDrop={() => handleDrop(day, hour)}
                                                             />
                                                         ))}
-                                                        {/* Shifts */}
                                                         {shifts.filter(s => s.day === day).map(shift => (
                                                             <div
                                                                 key={shift.id}
@@ -606,7 +665,6 @@ export default function Dashboard() {
                                             </div>
                                         </div>
 
-                                        {/* Legend */}
                                         {employees.length > 0 && (
                                             <div className="border-t border-white/8 px-4 py-3 flex flex-wrap gap-3">
                                                 {employees.map(emp => (
@@ -625,7 +683,6 @@ export default function Dashboard() {
                                 )}
                             </div>
 
-                            {/* Chat panel */}
                             {showChat && (
                                 <div className="no-print w-80 shrink-0 border border-white/8 rounded-2xl bg-[#0d0d0d] flex flex-col h-[600px] fade-up">
                                     <div className="px-4 py-3 border-b border-white/8 flex items-center justify-between">
