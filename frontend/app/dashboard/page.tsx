@@ -317,6 +317,7 @@ export default function Dashboard() {
     @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@800&family=Outfit:wght@400;500;600;700;800&display=swap');
     * { font-family: 'Outfit', sans-serif; }
     .mono { font-family: 'DM Mono', monospace; }
+    .display { font-family: 'Syne', sans-serif; }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     .fade-up { animation: fadeUp 0.3s ease forwards; }
     @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.3); } 50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } }
@@ -339,7 +340,7 @@ export default function Dashboard() {
                         <div className="w-8 h-8 bg-emerald-400 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-400/20">
                             <span className="text-black font-black text-sm" style={{ fontFamily: 'Syne, sans-serif' }}>S</span>
                         </div>
-                        <span className="font-bold tracking-tight text-lg" style={{fontFamily: 'Syne, sans-serif'}}>Schedio</span>
+                        <span className="font-bold tracking-tight text-lg display">Schedio</span>
                     </Link>
                     <div className="flex items-center gap-3">
                         {user && <span className="text-sm text-white/30 mono">{user.email}</span>}
