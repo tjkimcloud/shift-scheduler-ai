@@ -78,6 +78,7 @@ export default function Dashboard() {
     const [files, setFiles] = useState<{ id: string, name: string, mimeType: string }[]>([])
     const [ingesting, setIngesting] = useState<string | null>(null)
     const [driveConnected, setDriveConnected] = useState(false)
+    const [finalizing, setFinalizing] = useState(false)
 
     // Location state
     const [locations, setLocations] = useState<Location[]>([])
@@ -228,23 +229,25 @@ export default function Dashboard() {
     }
 
     const finalizeSchedule = async () => {
-    if (!rawSchedule) {
-        setMessage('⚠️ No schedule to finalize. Generate a schedule first.')
-        return
-    }
-    const today = new Date()
-    const monday = new Date(today)
-    monday.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1))
-    const weekStart = monday.toISOString().split('T')[0]
+        if (!rawSchedule) {
+            setMessage('⚠️ No schedule to finalize. Generate a schedule first.')
+            return
+        }
+        setFinalizing(true)
+        const today = new Date()
+        const monday = new Date(today)
+        monday.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1))
+        const weekStart = monday.toISOString().split('T')[0]
 
-    const data = await apiCall('/finalize-schedule', 'POST', {
-        schedule: rawSchedule,
-        location_id: activeLocationId,
-        week_start: weekStart
-    })
-    if (data?.message) setMessage(`✅ ${data.message}`)
-    if (data?.detail) setMessage(`❌ ${data.detail}`)
-}
+        const data = await apiCall('/finalize-schedule', 'POST', {
+            schedule: rawSchedule,
+            location_id: activeLocationId,
+            week_start: weekStart
+        })
+        if (data?.message) setMessage(`✅ ${data.message}`)
+        if (data?.detail) setMessage(`❌ ${data.detail}`)
+        setFinalizing(false)
+    }
 
     const sendChatMessage = async () => {
         if (!chatInput.trim() || chatLoading) return
@@ -257,7 +260,8 @@ export default function Dashboard() {
             const data = await apiCall('/chat', 'POST', {
                 message: userMsg,
                 schedule: rawSchedule,
-                location_id: activeLocationId
+                location_id: activeLocationId,
+                client_date: new Date().toISOString().split('T')[0]
             })
             const reply = data?.response || "I couldn't process that request."
             setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
@@ -455,10 +459,20 @@ export default function Dashboard() {
                                     </button>
                                     <button
                                         onClick={finalizeSchedule}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-400/30 text-emerald-400 text-sm font-medium hover:bg-emerald-400/10 transition-all"
+                                        disabled={finalizing}
+                                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-400/30 text-emerald-400 text-sm font-medium hover:bg-emerald-400/10 transition-all disabled:opacity-60"
                                     >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                        Finalize Schedule
+                                        {finalizing ? (
+                                            <>
+                                                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                                                Saving...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                                Finalize Schedule
+                                            </>
+                                        )}
                                     </button>
                                 </>
                             )}
