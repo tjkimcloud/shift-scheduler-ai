@@ -335,12 +335,12 @@ export default function Dashboard() {
             <main className="min-h-screen bg-[#080808] text-white">
                 {/* Nav */}
                 <nav className="no-print flex items-center justify-between px-8 py-4 border-b border-white/5 bg-[#080808]/80 backdrop-blur-md sticky top-0 z-50">
-                    <div className="flex items-center gap-3">
+                    <Link href="/" className="flex items-center gap-3">
                         <div className="w-8 h-8 bg-emerald-400 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-400/20">
                             <span className="text-black font-black text-sm">S</span>
                         </div>
                         <span className="font-bold tracking-tight text-lg">Schedio</span>
-                    </div>
+                    </Link>
                     <div className="flex items-center gap-3">
                         {user && <span className="text-sm text-white/30 mono">{user.email}</span>}
                         {user && !user.is_pro && (
@@ -367,11 +367,10 @@ export default function Dashboard() {
                                 <button
                                     key={loc.id}
                                     onClick={() => setActiveLocationId(loc.id)}
-                                    className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-all border ${
-                                        activeLocationId === loc.id
+                                    className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-all border ${activeLocationId === loc.id
                                             ? 'bg-emerald-400/10 border-emerald-400/40 text-emerald-400'
                                             : 'border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
-                                    }`}
+                                        }`}
                                 >
                                     {loc.name}
                                 </button>
