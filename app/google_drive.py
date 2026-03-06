@@ -52,19 +52,27 @@ def list_files(service, folder_id: str = None):
     
     return results.get('files', [])
 
-def download_file(service, file_id: str, mime_type: str) -> str:
-    if mime_type == 'application/vnd.google-apps.document':
+def download_file(service, file_id, mime_type):
+    # Google Docs/Sheets/Slides need export, not direct download
+    export_map = {
+        'application/vnd.google-apps.document': 'text/plain',
+        'application/vnd.google-apps.spreadsheet': 'text/csv',
+        'application/vnd.google-apps.presentation': 'text/plain',
+    }
+
+    if mime_type in export_map:
+        export_mime = export_map[mime_type]
         request = service.files().export_media(
             fileId=file_id,
-            mimeType='text/plain'
+            mimeType=export_mime
         )
     else:
+        # PDFs, images, uploaded files — download directly
         request = service.files().get_media(fileId=file_id)
-    
+
     buffer = io.BytesIO()
     downloader = MediaIoBaseDownload(buffer, request)
     done = False
     while not done:
         _, done = downloader.next_chunk()
-    
     return buffer.getvalue().decode('utf-8', errors='ignore')
