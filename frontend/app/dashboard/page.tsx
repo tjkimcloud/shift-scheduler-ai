@@ -26,6 +26,13 @@ interface Shift {
     color: string
 }
 
+interface ShiftGroup {
+    day: string
+    startHour: number
+    endHour: number
+    employees: string[]
+}
+
 interface ChatMessage {
     role: 'user' | 'assistant'
     content: string
@@ -48,7 +55,6 @@ const getWeekDays = () => {
 
 const WEEK_DAYS = getWeekDays()
 const DAYS = WEEK_DAYS.map(d => d.full)
-const HOURS = Array.from({ length: 17 }, (_, i) => i + 6)
 const COLORS = [
     'bg-emerald-500/80 border-emerald-400',
     'bg-sky-500/80 border-sky-400',
@@ -60,7 +66,35 @@ const COLORS = [
     'bg-orange-500/80 border-orange-400',
 ]
 
-const HOUR_HEIGHT = 56
+const COLOR_DOTS = [
+    'bg-emerald-400',
+    'bg-sky-400',
+    'bg-violet-400',
+    'bg-amber-400',
+    'bg-rose-400',
+    'bg-cyan-400',
+    'bg-fuchsia-400',
+    'bg-orange-400',
+]
+
+const formatHour = (h: number) => {
+    if (h === 12) return '12pm'
+    if (h === 0) return '12am'
+    return h > 12 ? `${h - 12}pm` : `${h}am`
+}
+
+// Group flat shifts array into shift cards by day+startHour+endHour
+const groupShifts = (shifts: Shift[]): ShiftGroup[] => {
+    const map = new Map<string, ShiftGroup>()
+    shifts.forEach(s => {
+        const key = `${s.day}|${s.startHour}|${s.endHour}`
+        if (!map.has(key)) {
+            map.set(key, { day: s.day, startHour: s.startHour, endHour: s.endHour, employees: [] })
+        }
+        map.get(key)!.employees.push(s.employee)
+    })
+    return Array.from(map.values()).sort((a, b) => a.startHour - b.startHour)
+}
 
 export default function Dashboard() {
     const [user, setUser] = useState<UserData | null>(null)
@@ -72,7 +106,6 @@ export default function Dashboard() {
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
     const [chatInput, setChatInput] = useState('')
     const [chatLoading, setChatLoading] = useState(false)
-    const [dragging, setDragging] = useState<string | null>(null)
     const [showChat, setShowChat] = useState(false)
     const [showDrive, setShowDrive] = useState(false)
     const [files, setFiles] = useState<{ id: string, name: string, mimeType: string }[]>([])
@@ -82,6 +115,10 @@ export default function Dashboard() {
     const [showUpgradePrompt, setShowUpgradePrompt] = useState(false)
     const [showLimitModal, setShowLimitModal] = useState(false)
     const [totalEmployees, setTotalEmployees] = useState(0)
+
+    // Drag state: tracks which employee from which group is being dragged
+    const [dragging, setDragging] = useState<{ employee: string; fromKey: string } | null>(null)
+    const [dragOverKey, setDragOverKey] = useState<string | null>(null)
 
     // Location state
     const [locations, setLocations] = useState<Location[]>([])
@@ -161,6 +198,25 @@ export default function Dashboard() {
         setIngesting(null)
     }
 
+    const parseShifts = (rawShifts: any[]) => {
+        const employeeColors: Record<string, string> = {}
+        let colorIndex = 0
+        return rawShifts.map((s: any) => {
+            if (!employeeColors[s.employee]) {
+                employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
+                colorIndex++
+            }
+            return {
+                id: `${s.employee}-${s.day}-${s.startHour}`,
+                employee: s.employee,
+                day: s.day,
+                startHour: s.startHour,
+                endHour: s.endHour,
+                color: employeeColors[s.employee]
+            }
+        })
+    }
+
     useEffect(() => {
         if (!token) { router.push('/login'); return }
         apiCall('/me').then(data => { if (data) setUser(data) })
@@ -181,7 +237,6 @@ export default function Dashboard() {
         }
     }, [])
 
-    // Clear schedule when switching locations
     useEffect(() => {
         setShifts([])
         setRawSchedule('')
@@ -202,24 +257,6 @@ export default function Dashboard() {
             : '/generate-schedule'
         const data = await apiCall(endpoint, 'POST')
         if (data?.shifts && data.shifts.length > 0) {
-            const employeeColors: Record<string, string> = {}
-            let colorIndex = 0
-            const parsedShifts = data.shifts.map((s: any) => {
-                if (!employeeColors[s.employee]) {
-                    employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
-                    colorIndex++
-                }
-                return {
-                    id: `${s.employee}-${s.day}-${s.startHour}`,
-                    employee: s.employee,
-                    day: s.day,
-                    startHour: s.startHour,
-                    endHour: s.endHour,
-                    color: employeeColors[s.employee]
-                }
-            })
-
-            // Handle employee limit
             if (data.employee_limit_hit) {
                 setShowLimitModal(true)
                 setTotalEmployees(data.total_employees)
@@ -228,13 +265,12 @@ export default function Dashboard() {
                 setShowLimitModal(false)
                 setShowUpgradePrompt(false)
             }
-
-            setShifts(parsedShifts)
+            setShifts(parseShifts(data.shifts))
             setRawSchedule(data.schedule)
             setActiveTab('calendar')
             setChatMessages([{
                 role: 'assistant',
-                content: "I've generated your schedule! You can drag shifts to adjust them, or ask me to make changes — like \"Move Sarah to Friday\" or \"Add an extra shift on Saturday evening\"."
+                content: "I've generated your schedule! Drag any employee to a different shift, or ask me to make changes — like \"Move Sarah to Friday\" or \"Add an extra shift on Saturday evening\"."
             }])
             setShowChat(true)
         }
@@ -256,7 +292,6 @@ export default function Dashboard() {
         const monday = new Date(today)
         monday.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1))
         const weekStart = monday.toISOString().split('T')[0]
-
         const data = await apiCall('/finalize-schedule', 'POST', {
             schedule: rawSchedule,
             location_id: activeLocationId,
@@ -268,17 +303,16 @@ export default function Dashboard() {
     }
 
     const sendChatMessage = async () => {
-    if (!chatInput.trim() || chatLoading) return
-    if (showUpgradePrompt) {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: 'Upgrade to Pro to access the AI assistant and view your full schedule.' }])
-        setChatInput('')
-        return
-    }
+        if (!chatInput.trim() || chatLoading) return
+        if (showUpgradePrompt) {
+            setChatMessages(prev => [...prev, { role: 'assistant', content: 'Upgrade to Pro to access the AI assistant and view your full schedule.' }])
+            setChatInput('')
+            return
+        }
         const userMsg = chatInput.trim()
         setChatInput('')
         setChatMessages(prev => [...prev, { role: 'user', content: userMsg }])
         setChatLoading(true)
-
         try {
             const data = await apiCall('/chat', 'POST', {
                 message: userMsg,
@@ -288,25 +322,8 @@ export default function Dashboard() {
             })
             const reply = data?.response || "I couldn't process that request."
             setChatMessages(prev => [...prev, { role: 'assistant', content: reply }])
-
             if (data?.shifts && data.shifts.length > 0) {
-                const employeeColors: Record<string, string> = {}
-                let colorIndex = 0
-                const parsedShifts = data.shifts.map((s: any) => {
-                    if (!employeeColors[s.employee]) {
-                        employeeColors[s.employee] = COLORS[colorIndex % COLORS.length]
-                        colorIndex++
-                    }
-                    return {
-                        id: `${s.employee}-${s.day}-${s.startHour}`,
-                        employee: s.employee,
-                        day: s.day,
-                        startHour: s.startHour,
-                        endHour: s.endHour,
-                        color: employeeColors[s.employee]
-                    }
-                })
-                setShifts(parsedShifts)
+                setShifts(parseShifts(data.shifts))
                 if (data.schedule) setRawSchedule(data.schedule)
             }
         } catch {
@@ -315,34 +332,57 @@ export default function Dashboard() {
         setChatLoading(false)
     }
 
-    const handleDragStart = (shiftId: string) => setDragging(shiftId)
+    // Drag: start dragging an employee from a specific shift group
+    const handleDragStart = (employee: string, groupKey: string) => {
+        setDragging({ employee, fromKey: groupKey })
+    }
 
-    const handleDrop = (day: string, hour: number) => {
-        if (!dragging) return
-        setShifts(prev => prev.map(s => {
-            if (s.id !== dragging) return s
-            const duration = s.endHour - s.startHour
-            return { ...s, day, startHour: hour, endHour: hour + duration, id: `${s.employee}-${day}-${hour}` }
-        }))
+    // Drop: move employee from one shift group to another
+    const handleDrop = (toKey: string) => {
+        if (!dragging || dragging.fromKey === toKey) {
+            setDragging(null)
+            setDragOverKey(null)
+            return
+        }
+
+        const [toDay, toStartStr, toEndStr] = toKey.split('|')
+        const toStartHour = parseInt(toStartStr)
+        const toEndHour = parseInt(toEndStr)
+
+        setShifts(prev => {
+            // Remove employee from old group
+            const removed = prev.filter(s =>
+                !(s.employee === dragging.employee && `${s.day}|${s.startHour}|${s.endHour}` === dragging.fromKey)
+            )
+            // Add employee to new group
+            const existing = prev.find(s => s.employee === dragging.employee)
+            const newShift: Shift = {
+                id: `${dragging.employee}-${toDay}-${toStartHour}`,
+                employee: dragging.employee,
+                day: toDay,
+                startHour: toStartHour,
+                endHour: toEndHour,
+                color: existing?.color || COLORS[0]
+            }
+            return [...removed, newShift]
+        })
         setDragging(null)
+        setDragOverKey(null)
     }
 
     const handlePrint = () => window.print()
-
-    const logout = () => {
-        localStorage.clear()
-        router.push('/')
-    }
+    const logout = () => { localStorage.clear(); router.push('/') }
 
     const employees = [...new Set(shifts.map(s => s.employee))]
     const employeeColorMap: Record<string, string> = {}
-    employees.forEach((emp) => {
+    employees.forEach(emp => {
         const shift = shifts.find(s => s.employee === emp)
         if (shift) employeeColorMap[emp] = shift.color
     })
 
     const activeLocation = locations.find(l => l.id === activeLocationId)
     const canAddLocation = user ? locations.length < (user.max_locations || 1) : false
+    const shiftGroups = groupShifts(shifts)
 
     return (
         <>
@@ -357,14 +397,17 @@ export default function Dashboard() {
     .fade-up { animation: fadeUp 0.3s ease forwards; }
     @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.3); } 50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } }
     .glow-pulse { animation: pulse-glow 2s infinite; }
-    .shift-block { cursor: grab; transition: opacity 0.15s, transform 0.15s; }
-    .shift-block:active { cursor: grabbing; opacity: 0.7; transform: scale(0.97); }
-    .drop-zone { transition: background 0.1s; }
-    .drop-zone:hover { background: rgba(255,255,255,0.04); }
+    .employee-row { cursor: grab; transition: opacity 0.15s, background 0.15s; }
+    .employee-row:active { cursor: grabbing; opacity: 0.5; }
+    .shift-card { transition: border-color 0.15s, background 0.15s; }
+    .shift-card.drag-over { border-color: rgba(52,211,153,0.6) !important; background: rgba(52,211,153,0.05) !important; }
     @media print {
       .no-print { display: none !important; }
       .print-area { break-inside: avoid; }
       body { background: white !important; color: black !important; }
+      .shift-card { border: 1px solid #ddd !important; background: white !important; break-inside: avoid; }
+      .shift-time { color: #555 !important; }
+      .employee-name { color: #000 !important; }
     }
 `}</style>
 
@@ -387,9 +430,7 @@ export default function Dashboard() {
                         {user?.is_pro && (
                             <span className="text-xs bg-emerald-400/10 border border-emerald-400/30 text-emerald-400 px-2.5 py-1 rounded-full font-bold mono">PRO</span>
                         )}
-                        <button onClick={logout} className="text-sm text-white/30 hover:text-white/70 transition-colors">
-                            Sign out
-                        </button>
+                        <button onClick={logout} className="text-sm text-white/30 hover:text-white/70 transition-colors">Sign out</button>
                     </div>
                 </nav>
 
@@ -405,13 +446,11 @@ export default function Dashboard() {
                                     onClick={() => setActiveLocationId(loc.id)}
                                     className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-all border ${activeLocationId === loc.id
                                         ? 'bg-emerald-400/10 border-emerald-400/40 text-emerald-400'
-                                        : 'border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
-                                        }`}
+                                        : 'border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'}`}
                                 >
                                     {loc.name}
                                 </button>
                             ))}
-
                             {canAddLocation ? (
                                 showNewLocation ? (
                                     <div className="flex items-center gap-2">
@@ -423,32 +462,19 @@ export default function Dashboard() {
                                             placeholder="Location name..."
                                             className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-emerald-400/50 w-44"
                                         />
-                                        <button
-                                            onClick={createLocation}
-                                            disabled={creatingLocation || !newLocationName.trim()}
-                                            className="px-3 py-1.5 rounded-xl bg-emerald-400 text-black text-sm font-bold disabled:opacity-40"
-                                        >
+                                        <button onClick={createLocation} disabled={creatingLocation || !newLocationName.trim()} className="px-3 py-1.5 rounded-xl bg-emerald-400 text-black text-sm font-bold disabled:opacity-40">
                                             {creatingLocation ? '...' : 'Add'}
                                         </button>
-                                        <button
-                                            onClick={() => { setShowNewLocation(false); setNewLocationName('') }}
-                                            className="text-white/30 hover:text-white/60 text-lg leading-none"
-                                        >✕</button>
+                                        <button onClick={() => { setShowNewLocation(false); setNewLocationName('') }} className="text-white/30 hover:text-white/60 text-lg leading-none">✕</button>
                                     </div>
                                 ) : (
-                                    <button
-                                        onClick={() => setShowNewLocation(true)}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-dashed border-white/15 text-white/30 text-sm hover:border-white/30 hover:text-white/50 transition-all"
-                                    >
+                                    <button onClick={() => setShowNewLocation(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-dashed border-white/15 text-white/30 text-sm hover:border-white/30 hover:text-white/50 transition-all">
                                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                                         Add location
                                     </button>
                                 )
                             ) : (
-                                <Link
-                                    href="/upgrade"
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-dashed border-white/15 text-white/30 text-sm hover:border-emerald-400/30 hover:text-emerald-400/60 transition-all"
-                                >
+                                <Link href="/upgrade" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-dashed border-white/15 text-white/30 text-sm hover:border-emerald-400/30 hover:text-emerald-400/60 transition-all">
                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                                     Add location — upgrade required
                                 </Link>
@@ -463,59 +489,33 @@ export default function Dashboard() {
                     <div className="no-print flex items-center justify-between mb-8">
                         <div>
                             <h1 className="text-2xl font-bold">{activeLocation ? activeLocation.name : 'Schedule'}</h1>
-                            <p className="text-white/40 text-sm mt-0.5">Weekly staff schedule — drag shifts to adjust</p>
+                            <p className="text-white/40 text-sm mt-0.5">Weekly staff schedule — drag employees between shifts to adjust</p>
                         </div>
                         <div className="flex items-center gap-3">
                             {shifts.length > 0 && (
                                 <>
-                                    <button
-                                        onClick={() => setShowChat(!showChat)}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all"
-                                    >
+                                    <button onClick={() => setShowChat(!showChat)} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all">
                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3-3-3z" /></svg>
                                         AI Assistant
                                     </button>
-                                    <button
-                                        onClick={handlePrint}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all"
-                                    >
+                                    <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all">
                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                                         Print
                                     </button>
-                                    <button
-                                        onClick={finalizeSchedule}
-                                        disabled={finalizing}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-400/30 text-emerald-400 text-sm font-medium hover:bg-emerald-400/10 transition-all disabled:opacity-60"
-                                    >
+                                    <button onClick={finalizeSchedule} disabled={finalizing} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-400/30 text-emerald-400 text-sm font-medium hover:bg-emerald-400/10 transition-all disabled:opacity-60">
                                         {finalizing ? (
-                                            <>
-                                                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                                                Saving...
-                                            </>
+                                            <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Saving...</>
                                         ) : (
-                                            <>
-                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                                Finalize Schedule
-                                            </>
+                                            <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Finalize Schedule</>
                                         )}
                                     </button>
                                 </>
                             )}
-                            <button
-                                onClick={generateSchedule}
-                                disabled={loading || !activeLocationId}
-                                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-400 text-black font-bold text-sm hover:bg-emerald-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed glow-pulse"
-                            >
+                            <button onClick={generateSchedule} disabled={loading || !activeLocationId} className="flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-400 text-black font-bold text-sm hover:bg-emerald-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed glow-pulse">
                                 {loading ? (
-                                    <>
-                                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                                        Generating...
-                                    </>
+                                    <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Generating...</>
                                 ) : (
-                                    <>
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                        {shifts.length > 0 ? 'Regenerate' : 'Generate Schedule'}
-                                    </>
+                                    <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>{shifts.length > 0 ? 'Regenerate' : 'Generate Schedule'}</>
                                 )}
                             </button>
                         </div>
@@ -541,10 +541,7 @@ export default function Dashboard() {
 
                     {/* Google Drive Panel */}
                     <div className="no-print mb-6 border border-white/8 rounded-2xl bg-[#0d0d0d] overflow-hidden">
-                        <button
-                            onClick={() => setShowDrive(!showDrive)}
-                            className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/3 transition-colors"
-                        >
+                        <button onClick={() => setShowDrive(!showDrive)} className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/3 transition-colors">
                             <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
                                     <svg className="w-4 h-4 text-white/50" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.28 3zm5.72 9.9L7.28 21H16.72l-4.72-8.1zm5.72-9.9L12 12.9 17.72 3H12z" /></svg>
@@ -560,9 +557,7 @@ export default function Dashboard() {
                                         )}
                                     </div>
                                     <p className="text-xs text-white/30">
-                                        {activeLocation
-                                            ? `Files will be ingested into "${activeLocation.name}"`
-                                            : driveConnected ? 'Load your scheduling files below' : 'Connect Drive to import availability files and historical schedules'}
+                                        {activeLocation ? `Files will be ingested into "${activeLocation.name}"` : driveConnected ? 'Load your scheduling files below' : 'Connect Drive to import availability files and historical schedules'}
                                     </p>
                                 </div>
                             </div>
@@ -578,20 +573,16 @@ export default function Dashboard() {
                                             Connect Google Drive
                                         </button>
                                     ) : (
-                                        <button onClick={connectDrive} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all text-white/40">
-                                            Reconnect
-                                        </button>
+                                        <button onClick={connectDrive} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:border-white/20 hover:bg-white/5 transition-all text-white/40">Reconnect</button>
                                     )}
                                     <button onClick={loadFiles} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 text-sm font-medium hover:bg-white/10 transition-all">
                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                                         Load files
                                     </button>
                                 </div>
-
                                 {!activeLocationId && (
                                     <p className="text-xs text-amber-400/70 mb-3">⚠️ Select or create a location above before ingesting files.</p>
                                 )}
-
                                 {files.length > 0 && (
                                     <div className="space-y-1">
                                         <p className="text-xs text-white/30 mb-2 uppercase tracking-wider font-medium">Your files</p>
@@ -601,18 +592,13 @@ export default function Dashboard() {
                                                     <svg className="w-3.5 h-3.5 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                                     <span className="text-sm text-white/60 truncate max-w-[240px]">{file.name}</span>
                                                 </div>
-                                                <button
-                                                    onClick={() => ingestFile(file.id)}
-                                                    disabled={ingesting === file.id || !activeLocationId}
-                                                    className="text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50 font-medium ml-4 shrink-0"
-                                                >
+                                                <button onClick={() => ingestFile(file.id)} disabled={ingesting === file.id || !activeLocationId} className="text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50 font-medium ml-4 shrink-0">
                                                     {ingesting === file.id ? 'Ingesting...' : 'Ingest →'}
                                                 </button>
                                             </div>
                                         ))}
                                     </div>
                                 )}
-
                                 {files.length === 0 && driveConnected && (
                                     <p className="text-xs text-white/30 text-center py-4">No scheduling files found. Click "Load files" to browse your Drive.</p>
                                 )}
@@ -628,9 +614,7 @@ export default function Dashboard() {
                             </div>
                             <p className="text-white/30 text-sm mb-2">No schedule yet</p>
                             <p className="text-white/20 text-xs">
-                                {!activeLocationId
-                                    ? 'Create a location first, then connect Google Drive and ingest your availability files'
-                                    : 'Connect Google Drive and ingest your availability files, then click Generate Schedule'}
+                                {!activeLocationId ? 'Create a location first, then connect Google Drive and ingest your availability files' : 'Connect Google Drive and ingest your availability files, then click Generate Schedule'}
                             </p>
                         </div>
                     ) : loading ? (
@@ -654,9 +638,8 @@ export default function Dashboard() {
                                     </button>
                                 </div>
 
-                                {/* Calendar or raw text with blur overlay */}
                                 <div className="relative">
-                                    {/* Blur overlay shown after modal is dismissed */}
+                                    {/* Blur overlay */}
                                     {!showLimitModal && showUpgradePrompt && (
                                         <div className="absolute inset-0 z-20 backdrop-blur-md bg-black/60 rounded-2xl flex flex-col items-center justify-center gap-4">
                                             <div className="w-12 h-12 rounded-2xl bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center">
@@ -666,18 +649,16 @@ export default function Dashboard() {
                                                 <p className="text-white font-semibold mb-1">Schedule locked</p>
                                                 <p className="text-white/50 text-sm">Your team has {totalEmployees} employees — upgrade to view</p>
                                             </div>
-                                            <Link href="/upgrade" className="bg-emerald-400 text-black font-bold px-6 py-2.5 rounded-xl text-sm hover:bg-emerald-300 transition-colors">
-                                                Upgrade to Pro →
-                                            </Link>
+                                            <Link href="/upgrade" className="bg-emerald-400 text-black font-bold px-6 py-2.5 rounded-xl text-sm hover:bg-emerald-300 transition-colors">Upgrade to Pro →</Link>
                                         </div>
                                     )}
 
                                     {activeTab === 'calendar' ? (
                                         <div className="border border-white/8 rounded-2xl overflow-hidden bg-[#0d0d0d]">
-                                            <div className="grid border-b border-white/8" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
-                                                <div className="border-r border-white/5" />
+                                            {/* Day header row */}
+                                            <div className="grid border-b border-white/8" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
                                                 {DAYS.map(day => (
-                                                    <div key={day} className="py-3 px-2 text-center border-r border-white/5 last:border-0">
+                                                    <div key={day} className="py-3 px-3 border-r border-white/5 last:border-0">
                                                         <span className="text-xs font-semibold text-white/50 uppercase tracking-wider">
                                                             {WEEK_DAYS.find(w => w.full === day)?.display || day.slice(0, 3)}
                                                         </span>
@@ -685,58 +666,71 @@ export default function Dashboard() {
                                                 ))}
                                             </div>
 
-                                            <div className="relative" style={{ height: `${HOUR_HEIGHT * 17}px` }}>
-                                                <div className="grid h-full" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
-                                                    <div className="border-r border-white/5">
-                                                        {HOURS.map(hour => (
-                                                            <div key={hour} style={{ height: HOUR_HEIGHT }} className="border-b border-white/5 flex items-start justify-end pr-3 pt-1.5">
-                                                                <span className="text-xs text-white/20 mono">
-                                                                    {hour === 12 ? '12pm' : hour > 12 ? `${hour - 12}pm` : `${hour}am`}
-                                                                </span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-
-                                                    {DAYS.map(day => (
-                                                        <div key={day} className="border-r border-white/5 last:border-0 relative">
-                                                            {HOURS.map(hour => (
-                                                                <div
-                                                                    key={hour}
-                                                                    className="drop-zone border-b border-white/5"
-                                                                    style={{ height: HOUR_HEIGHT }}
-                                                                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                                                                    onDrop={() => handleDrop(day, hour)}
-                                                                />
-                                                            ))}
-                                                            {shifts.filter(s => s.day === day).map(shift => (
-                                                                <div
-                                                                    key={shift.id}
-                                                                    draggable
-                                                                    onDragStart={() => handleDragStart(shift.id)}
-                                                                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                                                                    onDrop={(e) => { e.stopPropagation(); handleDrop(day, shift.startHour); }}
-                                                                    className={`shift-block absolute left-1 right-1 rounded-lg border ${shift.color} px-2 py-1 overflow-hidden`}
-                                                                    style={{
-                                                                        top: `${(shift.startHour - 6) * HOUR_HEIGHT + 2}px`,
-                                                                        height: `${(shift.endHour - shift.startHour) * HOUR_HEIGHT - 4}px`,
-                                                                    }}
-                                                                >
-                                                                    <p className="text-xs font-semibold text-white leading-tight truncate">{shift.employee}</p>
-                                                                    <p className="text-xs text-white/60 mono">
-                                                                        {shift.startHour > 12 ? shift.startHour - 12 : shift.startHour}{shift.startHour >= 12 ? 'pm' : 'am'} – {shift.endHour > 12 ? shift.endHour - 12 : shift.endHour}{shift.endHour >= 12 ? 'pm' : 'am'}
-                                                                    </p>
-                                                                </div>
-                                                            ))}
+                                            {/* Shift cards grid */}
+                                            <div className="grid" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                                                {DAYS.map(day => {
+                                                    const dayGroups = shiftGroups.filter(g => g.day === day)
+                                                    return (
+                                                        <div key={day} className="border-r border-white/5 last:border-0 p-2 space-y-2 min-h-[120px]">
+                                                            {dayGroups.length === 0 && (
+                                                                <div className="text-xs text-white/15 text-center pt-4">—</div>
+                                                            )}
+                                                            {dayGroups.map(group => {
+                                                                const groupKey = `${group.day}|${group.startHour}|${group.endHour}`
+                                                                const isDragOver = dragOverKey === groupKey
+                                                                return (
+                                                                    <div
+                                                                        key={groupKey}
+                                                                        className={`shift-card rounded-xl border border-white/8 bg-white/3 overflow-hidden ${isDragOver ? 'drag-over' : ''}`}
+                                                                        onDragOver={(e) => { e.preventDefault(); setDragOverKey(groupKey) }}
+                                                                        onDragLeave={() => setDragOverKey(null)}
+                                                                        onDrop={() => handleDrop(groupKey)}
+                                                                    >
+                                                                        {/* Shift time header */}
+                                                                        <div className="px-2.5 py-1.5 border-b border-white/5 bg-white/3">
+                                                                            <span className="shift-time text-xs text-white/40 mono font-medium">
+                                                                                {formatHour(group.startHour)} – {formatHour(group.endHour)}
+                                                                            </span>
+                                                                        </div>
+                                                                        {/* Employee rows */}
+                                                                        <div className="py-1">
+                                                                            {group.employees.map(emp => {
+                                                                                const colorClass = employeeColorMap[emp] || COLORS[0]
+                                                                                const dotClass = COLOR_DOTS[COLORS.indexOf(colorClass)] || 'bg-emerald-400'
+                                                                                return (
+                                                                                    <div
+                                                                                        key={emp}
+                                                                                        draggable
+                                                                                        onDragStart={() => handleDragStart(emp, groupKey)}
+                                                                                        onDragEnd={() => { setDragging(null); setDragOverKey(null) }}
+                                                                                        className="employee-row flex items-center gap-2 px-2.5 py-1 rounded-lg mx-1 hover:bg-white/5"
+                                                                                    >
+                                                                                        {/* Drag handle */}
+                                                                                        <svg className="w-3 h-3 text-white/20 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                                                                                            <circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/>
+                                                                                            <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+                                                                                            <circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>
+                                                                                        </svg>
+                                                                                        <div className={`w-2 h-2 rounded-full shrink-0 ${dotClass}`} />
+                                                                                        <span className="employee-name text-xs text-white/75 leading-tight truncate">{emp}</span>
+                                                                                    </div>
+                                                                                )
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+                                                                )
+                                                            })}
                                                         </div>
-                                                    ))}
-                                                </div>
+                                                    )
+                                                })}
                                             </div>
 
+                                            {/* Legend */}
                                             {employees.length > 0 && (
                                                 <div className="border-t border-white/8 px-4 py-3 flex flex-wrap gap-3">
                                                     {employees.map(emp => (
                                                         <div key={emp} className="flex items-center gap-1.5">
-                                                            <div className={`w-2.5 h-2.5 rounded-full ${employeeColorMap[emp]?.split(' ')[0]}`} />
+                                                            <div className={`w-2.5 h-2.5 rounded-full ${COLOR_DOTS[COLORS.indexOf(employeeColorMap[emp])] || 'bg-emerald-400'}`} />
                                                             <span className="text-xs text-white/50">{emp}</span>
                                                         </div>
                                                     ))}
@@ -751,6 +745,7 @@ export default function Dashboard() {
                                 </div>
                             </div>
 
+                            {/* Chat panel */}
                             {showChat && (
                                 <div className="no-print w-80 shrink-0 border border-white/8 rounded-2xl bg-[#0d0d0d] flex flex-col h-[600px] fade-up">
                                     <div className="px-4 py-3 border-b border-white/8 flex items-center justify-between">
@@ -760,14 +755,10 @@ export default function Dashboard() {
                                         </div>
                                         <button onClick={() => setShowChat(false)} className="text-white/30 hover:text-white/60 transition-colors text-lg leading-none">✕</button>
                                     </div>
-
                                     <div className="flex-1 overflow-y-auto p-4 space-y-3">
                                         {chatMessages.map((msg, i) => (
                                             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${msg.role === 'user'
-                                                    ? 'bg-emerald-400 text-black font-medium rounded-br-sm'
-                                                    : 'bg-white/8 text-white/80 rounded-bl-sm'
-                                                    }`}>
+                                                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${msg.role === 'user' ? 'bg-emerald-400 text-black font-medium rounded-br-sm' : 'bg-white/8 text-white/80 rounded-bl-sm'}`}>
                                                     {msg.content}
                                                 </div>
                                             </div>
@@ -785,7 +776,6 @@ export default function Dashboard() {
                                         )}
                                         <div ref={chatEndRef} />
                                     </div>
-
                                     <div className="p-3 border-t border-white/8">
                                         <div className="flex gap-2">
                                             <input
@@ -795,11 +785,7 @@ export default function Dashboard() {
                                                 placeholder="Ask to adjust schedule..."
                                                 className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm placeholder-white/20 text-white focus:outline-none focus:border-emerald-400/50 transition-colors"
                                             />
-                                            <button
-                                                onClick={sendChatMessage}
-                                                disabled={chatLoading || !chatInput.trim()}
-                                                className="w-9 h-9 bg-emerald-400 rounded-xl flex items-center justify-center hover:bg-emerald-300 transition-colors disabled:opacity-40 shrink-0"
-                                            >
+                                            <button onClick={sendChatMessage} disabled={chatLoading || !chatInput.trim()} className="w-9 h-9 bg-emerald-400 rounded-xl flex items-center justify-center hover:bg-emerald-300 transition-colors disabled:opacity-40 shrink-0">
                                                 <svg className="w-4 h-4 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg>
                                             </button>
                                         </div>
@@ -814,10 +800,7 @@ export default function Dashboard() {
                 {showLimitModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
                         <div className="bg-[#111] border border-white/10 rounded-2xl p-8 max-w-md w-full mx-4 relative">
-                            <button
-                                onClick={() => setShowLimitModal(false)}
-                                className="absolute top-4 right-4 text-white/30 hover:text-white/60 text-xl leading-none"
-                            >✕</button>
+                            <button onClick={() => setShowLimitModal(false)} className="absolute top-4 right-4 text-white/30 hover:text-white/60 text-xl leading-none">✕</button>
                             <div className="w-12 h-12 rounded-2xl bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center mb-6">
                                 <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                             </div>
@@ -826,15 +809,8 @@ export default function Dashboard() {
                                 Your schedule was generated for all {totalEmployees} employees. Upgrade to Pro to view and manage your full schedule with unlimited employees.
                             </p>
                             <div className="flex flex-col gap-3">
-                                <Link href="/upgrade" className="btn-primary block text-center bg-emerald-400 text-black font-bold rounded-xl py-3.5 text-sm">
-                                    Upgrade to Pro →
-                                </Link>
-                                <button
-                                    onClick={() => setShowLimitModal(false)}
-                                    className="text-white/30 text-sm hover:text-white/50 transition-colors"
-                                >
-                                    Maybe later
-                                </button>
+                                <Link href="/upgrade" className="btn-primary block text-center bg-emerald-400 text-black font-bold rounded-xl py-3.5 text-sm">Upgrade to Pro →</Link>
+                                <button onClick={() => setShowLimitModal(false)} className="text-white/30 text-sm hover:text-white/50 transition-colors">Maybe later</button>
                             </div>
                         </div>
                     </div>
