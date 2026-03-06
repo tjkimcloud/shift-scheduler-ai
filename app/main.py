@@ -233,8 +233,6 @@ def generate_schedule(location_id: str = None, db: Session = Depends(get_db), cu
     # Enforce free tier employee limit
     max_employees = db_user.max_employees or FREE_TIER_EMPLOYEE_LIMIT
     employee_limit_instruction = ""
-    if not db_user.is_pro:
-        employee_limit_instruction = f"\n\nIMPORTANT: This is a free tier account. Only schedule a maximum of {max_employees} employees. If more employees are in the availability data, pick the first {max_employees} and ignore the rest."
 
     # Generate week dates starting from Monday
     today = datetime.now()
@@ -244,9 +242,30 @@ def generate_schedule(location_id: str = None, db: Session = Depends(get_db), cu
     week_str = "\n".join(week_dates)
     
     schedule = generate_completion(
-        prompt=f"Here is the employee availability:\n\n{availability}\n\nPlease create a weekly schedule for the following week:\n{week_str}\n\nLabel each day with its full date (e.g. 'Monday, 03/02/2026'). Business hours are 9am to 10pm.{employee_limit_instruction}",
-        system="You are a scheduling assistant for small businesses. Create a fair weekly schedule based on employee availability. Always include the full date with each day."
-    )
+    prompt=f"""Here is all the context for this business location:
+
+{availability}
+
+Based on the above context, please:
+1. Identify any business rules, operating hours, or constraints mentioned (e.g. opening/closing times, minimum staff, days closed, role requirements)
+2. Identify employee availability
+3. Generate a full weekly schedule for the following week that respects both the business rules and employee availability:
+
+{week_str}
+
+Label each day with its full date (e.g. 'Monday, 03/02/2026'). If no specific business hours are found in the context, default to 9am–10pm.{employee_limit_instruction}""",
+
+    system="""You are a scheduling assistant for small businesses. 
+
+When building a schedule:
+- Always respect business operating hours if mentioned in the context
+- Always respect minimum staffing requirements if mentioned
+- Respect days the business is closed
+- Respect role requirements if mentioned (e.g. a manager must be present)
+- Build a fair schedule based on employee availability
+- Never schedule someone outside their stated availability
+- Always include the full date with each day."""
+)
     
     # Convert to structured JSON for the calendar
     client = OpenAI()
@@ -499,30 +518,37 @@ Last Sunday: {last_sunday.strftime('%m/%d/%Y')}"""
     ]) if relevant_chunks else ""
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": f"""You are a friendly scheduling assistant.
-
-{date_context}
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": f"""You are a friendly scheduling assistant for a small business. Today is {datetime.now().strftime('%B %d, %Y')}.
 
 Current schedule:
+
 {request.schedule}
 
-Relevant context ({chunk_type_filter.replace('_', ' ')}):
+Relevant context (business rules, operating hours, employee availability, and historical schedules):
+
 {historical_context}
 
-You can freely add new employees, remove employees, adjust shifts, and make any scheduling changes. Never ask for qualifications or availability before making changes — just do it.
+When making any schedule changes:
+- Respect business operating hours found in the context (do not schedule outside open hours)
+- Respect minimum staffing requirements if mentioned
+- Respect days the business is closed
+- Respect role requirements if mentioned (e.g. a manager must be present)
+- Never schedule someone outside their stated availability
+- If a requested change violates a business rule, explain why briefly and suggest an alternative
+
+You can freely add new employees, remove employees, adjust shifts, and make any scheduling changes that respect the above rules. Never ask for qualifications or availability before making changes — just do it and flag any conflicts after.
 
 When making schedule changes, respond in exactly this format:
-CONFIRM: [1 sentence confirmation]
+CONFIRM: [1 sentence confirmation, mention any conflicts or adjustments made]
 SCHEDULE:
 [full updated schedule]
 
-For history questions, answer directly and confidently using the context above. Reference exact dates in your answer (e.g. "Yes, Tony worked on Thursday 2/27/2026 from 4pm to 10pm").
-For questions unrelated to scheduling, politely redirect."""},
-            {"role": "user", "content": request.message}
-        ]
-    )
+For questions, just answer in 1-2 sentences. Only decline requests completely unrelated to scheduling."""},
+        {"role": "user", "content": request.message}
+    ]
+)
 
     full_response = response.choices[0].message.content
     confirm = full_response
