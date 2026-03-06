@@ -255,16 +255,19 @@ Based on the above context, please:
 
 Label each day with its full date (e.g. 'Monday, 03/02/2026'). If no specific business hours are found in the context, default to 9am–10pm.{employee_limit_instruction}""",
 
-    system="""You are a scheduling assistant for small businesses. 
+    system="""You are a scheduling assistant for small businesses.
 
 When building a schedule:
 - Always respect business operating hours if mentioned in the context
-- Always respect minimum staffing requirements if mentioned
+- EVERY shift that the business is open MUST have at least the minimum required staff — never leave a shift empty
+- If there are not enough available employees to cover a shift, assign the closest available employee even if it's outside their preferred availability, and note the conflict
+- Always respect minimum staffing requirements if mentioned (e.g. minimum 3 staff)
 - Respect days the business is closed
-- Respect role requirements if mentioned (e.g. a manager must be present)
+- Respect role requirements (e.g. a manager must be present for opening and closing)
 - Build a fair schedule based on employee availability
-- Never schedule someone outside their stated availability
-- Always include the full date with each day."""
+- Never schedule someone outside their stated availability UNLESS it is the only way to meet minimum staffing — in that case flag it
+- Always include the full date with each day
+- If a shift cannot be filled to minimum staffing, still assign whoever is available and flag it as understaffed"""
 )
     
     # Convert to structured JSON for the calendar
